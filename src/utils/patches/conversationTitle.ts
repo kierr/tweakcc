@@ -173,8 +173,8 @@ const getSummaryFileForLeafMessage = (
 
 const setTerminalTitleOverride = (title) => {
   process.env.CLAUDE_CODE_DISABLE_TERMINAL_TITLE = 1;
-  if (process.platform === "win32") process.title = 'Claude: ' + title;
-  else process.stdout.write('\\x1B]0;Claude: ' + title + '\\x07');
+  if (process.platform === "win32") process.title = title;
+  else process.stdout.write('\\x1B]0;' + title + '\\x07');
 };
 
 let CUR_CONVERSATION_TITLE = "";

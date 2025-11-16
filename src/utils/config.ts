@@ -18,6 +18,7 @@ import {
   TweakccConfig,
 } from './types.js';
 import {
+  checkRestorePermissions,
   hashFileInChunks,
   isDebug,
   replaceFileBreakingHardLinks,
@@ -235,6 +236,12 @@ export const restoreClijsFromBackup = async (
     console.log(`Restoring cli.js from backup to ${ccInstInfo.cliPath}`);
   }
 
+  // Check permissions before proceeding
+  const hasPermissions = await checkRestorePermissions([ccInstInfo.cliPath!, CLIJS_BACKUP_FILE]);
+  if (!hasPermissions) {
+    throw new Error('Insufficient permissions to restore cli.js. Check file permissions and disk space.');
+  }
+
   // Read the backup content
   const backupContent = await fs.readFile(CLIJS_BACKUP_FILE);
 
@@ -287,6 +294,12 @@ export const restoreNativeBinaryFromBackup = async (
     );
   }
 
+  // Check permissions before proceeding
+  const hasPermissions = await checkRestorePermissions([ccInstInfo.nativeInstallationPath!, NATIVE_BINARY_BACKUP_FILE]);
+  if (!hasPermissions) {
+    throw new Error('Insufficient permissions to restore native binary. Check file permissions and disk space.');
+  }
+
   // Read the backup content
   const backupContent = await fs.readFile(NATIVE_BINARY_BACKUP_FILE);
 
@@ -296,6 +309,13 @@ export const restoreNativeBinaryFromBackup = async (
     backupContent,
     'restore'
   );
+
+  // Clear all applied hashes since we're restoring to defaults
+  await clearAllAppliedHashes();
+
+  await updateConfigFile(config => {
+    config.changesApplied = false;
+  });
 
   return true;
 };
@@ -523,7 +543,7 @@ export const findClaudeCodeInstallation = async (
   return null;
 };
 
-const backupClijs = async (ccInstInfo: ClaudeCodeInstallationInfo) => {
+export const backupClijs = async (ccInstInfo: ClaudeCodeInstallationInfo) => {
   // Only backup cli.js for NPM installs (when cliPath is set)
   if (!ccInstInfo.cliPath) {
     if (isDebug()) {
@@ -532,37 +552,47 @@ const backupClijs = async (ccInstInfo: ClaudeCodeInstallationInfo) => {
     return;
   }
 
-  await ensureConfigDir();
-  if (isDebug()) {
-    console.log(`Backing up cli.js to ${CLIJS_BACKUP_FILE}`);
+  try {
+    await ensureConfigDir();
+    if (isDebug()) {
+      console.log(`Backing up cli.js to ${CLIJS_BACKUP_FILE}`);
+    }
+    await fs.copyFile(ccInstInfo.cliPath, CLIJS_BACKUP_FILE);
+    await updateConfigFile(config => {
+      config.changesApplied = false;
+      config.ccVersion = ccInstInfo.version;
+    });
+  } catch (error) {
+    console.error('Failed to backup cli.js:', error instanceof Error ? error.message : String(error));
+    throw new Error(`Backup failed: ${error instanceof Error ? error.message : String(error)}`);
   }
-  await fs.copyFile(ccInstInfo.cliPath, CLIJS_BACKUP_FILE);
-  await updateConfigFile(config => {
-    config.changesApplied = false;
-    config.ccVersion = ccInstInfo.version;
-  });
 };
 
 /**
  * Backs up the native installation binary to the config directory.
  */
-const backupNativeBinary = async (ccInstInfo: ClaudeCodeInstallationInfo) => {
+export const backupNativeBinary = async (ccInstInfo: ClaudeCodeInstallationInfo) => {
   if (!ccInstInfo.nativeInstallationPath) {
     return;
   }
 
-  await ensureConfigDir();
-  if (isDebug()) {
-    console.log(`Backing up native binary to ${NATIVE_BINARY_BACKUP_FILE}`);
+  try {
+    await ensureConfigDir();
+    if (isDebug()) {
+      console.log(`Backing up native binary to ${NATIVE_BINARY_BACKUP_FILE}`);
+    }
+    await fs.copyFile(
+      ccInstInfo.nativeInstallationPath,
+      NATIVE_BINARY_BACKUP_FILE
+    );
+    await updateConfigFile(config => {
+      config.changesApplied = false;
+      config.ccVersion = ccInstInfo.version;
+    });
+  } catch (error) {
+    console.error('Failed to backup native binary:', error instanceof Error ? error.message : String(error));
+    throw new Error(`Backup failed: ${error instanceof Error ? error.message : String(error)}`);
   }
-  await fs.copyFile(
-    ccInstInfo.nativeInstallationPath,
-    NATIVE_BINARY_BACKUP_FILE
-  );
-  await updateConfigFile(config => {
-    config.changesApplied = false;
-    config.ccVersion = ccInstInfo.version;
-  });
 };
 
 /**
@@ -599,8 +629,13 @@ export async function startupCheck(): Promise<StartupCheckInfo | null> {
         `startupCheck: ${CLIJS_BACKUP_FILE} not found; backing up cli.js`
       );
     }
-    await backupClijs(ccInstInfo);
-    hasBackedUp = true;
+    try {
+      await backupClijs(ccInstInfo);
+      hasBackedUp = true;
+    } catch (error) {
+      console.error('Failed to create initial backup:', error instanceof Error ? error.message : String(error));
+      // Continue without backup - user may need to manually create backup
+    }
   }
 
   // Backup native binary if we don't have any backup yet (for native installations)
@@ -614,8 +649,13 @@ export async function startupCheck(): Promise<StartupCheckInfo | null> {
         `startupCheck: ${NATIVE_BINARY_BACKUP_FILE} not found; backing up native binary`
       );
     }
-    await backupNativeBinary(ccInstInfo);
-    hasBackedUpNativeBinary = true;
+    try {
+      await backupNativeBinary(ccInstInfo);
+      hasBackedUpNativeBinary = true;
+    } catch (error) {
+      console.error('Failed to create initial native binary backup:', error instanceof Error ? error.message : String(error));
+      // Continue without backup - user may need to manually create backup
+    }
   }
 
   // If the installed CC version is different from what we have backed up, clear out our backup
@@ -631,7 +671,12 @@ export async function startupCheck(): Promise<StartupCheckInfo | null> {
         );
       }
       await fs.unlink(CLIJS_BACKUP_FILE);
-      await backupClijs(ccInstInfo);
+      try {
+        await backupClijs(ccInstInfo);
+      } catch (error) {
+        console.error('Failed to create backup after version change:', error instanceof Error ? error.message : String(error));
+        // Continue without backup - user may need to manually create backup
+      }
     }
 
     // Also backup native binary if version changed
@@ -644,7 +689,12 @@ export async function startupCheck(): Promise<StartupCheckInfo | null> {
       if (await doesFileExist(NATIVE_BINARY_BACKUP_FILE)) {
         await fs.unlink(NATIVE_BINARY_BACKUP_FILE);
       }
-      await backupNativeBinary(ccInstInfo);
+      try {
+        await backupNativeBinary(ccInstInfo);
+      } catch (error) {
+        console.error('Failed to create native binary backup after version change:', error instanceof Error ? error.message : String(error));
+        // Continue without backup - user may need to manually create backup
+      }
     }
 
     return {

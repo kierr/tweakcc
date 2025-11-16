@@ -19,6 +19,7 @@ import {
 import {
   readConfigFile,
   restoreClijsFromBackup,
+  restoreNativeBinaryFromBackup,
   updateConfigFile,
 } from './utils/config.js';
 import { openInExplorer, revealFileInExplorer } from './utils/misc.js';
@@ -121,14 +122,36 @@ Please reapply your changes below.`,
             type: 'info',
           });
           applyCustomization(config, startupCheckInfo.ccInstInfo).then(
-            newConfig => {
+            ({ config: newConfig, patchResults }) => {
               setConfig(newConfig);
-              setNotification({
-                message: 'Customization patches applied successfully!',
-                type: 'success',
-              });
+
+              const successfulPatches = patchResults.filter(r => r.success).length;
+              const failedPatches = patchResults.filter(r => !r.success).length;
+
+              if (failedPatches === 0) {
+                setNotification({
+                  message: `All ${successfulPatches} customization patches applied successfully!`,
+                  type: 'success',
+                });
+              } else if (successfulPatches === 0) {
+                setNotification({
+                  message: `No patches could be applied. ${failedPatches} patches failed. Check console for details.`,
+                  type: 'error',
+                });
+              } else {
+                const failedNames = patchResults.filter(r => !r.success).map(r => r.name).join(', ');
+                setNotification({
+                  message: `${successfulPatches} patches applied, ${failedPatches} failed (${failedNames}). Check console for details.`,
+                  type: 'warning',
+                });
+              }
             }
-          );
+          ).catch(error => {
+            setNotification({
+              message: `Failed to apply patches: ${error instanceof Error ? error.message : 'Unknown error'}`,
+              type: 'error',
+            });
+          });
         }
         break;
       case MainMenuItem.THEMES:
@@ -144,11 +167,22 @@ Please reapply your changes below.`,
         break;
       case MainMenuItem.RESTORE_ORIGINAL:
         if (startupCheckInfo.ccInstInfo) {
-          restoreClijsFromBackup(startupCheckInfo.ccInstInfo).then(() => {
-            setNotification({
-              message: 'Original Claude Code restored successfully!',
-              type: 'success',
-            });
+          const restorePromise = startupCheckInfo.ccInstInfo.nativeInstallationPath
+            ? restoreNativeBinaryFromBackup(startupCheckInfo.ccInstInfo)
+            : restoreClijsFromBackup(startupCheckInfo.ccInstInfo);
+
+          restorePromise.then((success) => {
+            if (success) {
+              setNotification({
+                message: 'Original Claude Code restored successfully!',
+                type: 'success',
+              });
+            } else {
+              setNotification({
+                message: 'Failed to restore Claude Code - backup file not found',
+                type: 'error',
+              });
+            }
             updateSettings(() => {});
           });
         }
@@ -184,9 +218,7 @@ Please reapply your changes below.`,
           <MainView
             onSubmit={handleMainSubmit}
             notification={notification}
-            isNativeInstallation={
-              !!startupCheckInfo.ccInstInfo?.nativeInstallationPath
-            }
+            startupCheckInfo={startupCheckInfo}
           />
         ) : currentView === MainMenuItem.THEMES ? (
           <ThemesView onBack={handleBack} />

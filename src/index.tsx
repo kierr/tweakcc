@@ -9,7 +9,7 @@ import {
   CONFIG_FILE,
   CONFIG_DIR,
 } from './utils/types.js';
-import { startupCheck, readConfigFile } from './utils/config.js';
+import { startupCheck, readConfigFile, backupClijs, backupNativeBinary, restoreClijsFromBackup, restoreNativeBinaryFromBackup } from './utils/config.js';
 import { enableDebug } from './utils/misc.js';
 import { applyCustomization } from './utils/patches/index.js';
 import { preloadStringsFile } from './utils/promptSync.js';
@@ -48,12 +48,74 @@ const main = async () => {
     )
     .version('3.1.0')
     .option('-d, --debug', 'enable debug mode')
-    .option('-a, --apply', 'apply saved customizations without interactive UI');
+    .option('-a, --apply', 'apply saved customizations without interactive UI')
+    .option('--backup', 'create a backup of the current Claude Code installation')
+    .option('--restore', 'restore Claude Code from backup (original state)');
   program.parse();
   const options = program.opts();
 
   if (options.debug) {
     enableDebug();
+  }
+
+  // Handle --backup flag
+  if (options.backup) {
+    console.log('Creating backup of Claude Code installation...');
+
+    // Find Claude Code installation
+    const startupCheckInfo = await startupCheck();
+
+    if (!startupCheckInfo || !startupCheckInfo.ccInstInfo) {
+      console.error('Cannot find Claude Code installation');
+      process.exit(1);
+    }
+
+    try {
+      if (startupCheckInfo.ccInstInfo.nativeInstallationPath) {
+        await backupNativeBinary(startupCheckInfo.ccInstInfo);
+        console.log('✓ Native binary backup created successfully');
+      } else {
+        await backupClijs(startupCheckInfo.ccInstInfo);
+        console.log('✓ CLI backup created successfully');
+      }
+    } catch (error) {
+      console.error('✗ Backup failed:', error instanceof Error ? error.message : String(error));
+      process.exit(1);
+    }
+    process.exit(0);
+  }
+
+  // Handle --restore flag
+  if (options.restore) {
+    console.log('Restoring Claude Code from backup...');
+
+    // Find Claude Code installation
+    const startupCheckInfo = await startupCheck();
+
+    if (!startupCheckInfo || !startupCheckInfo.ccInstInfo) {
+      console.error('Cannot find Claude Code installation');
+      process.exit(1);
+    }
+
+    try {
+      let success = false;
+      if (startupCheckInfo.ccInstInfo.nativeInstallationPath) {
+        success = await restoreNativeBinaryFromBackup(startupCheckInfo.ccInstInfo);
+      } else {
+        success = await restoreClijsFromBackup(startupCheckInfo.ccInstInfo);
+      }
+
+      if (success) {
+        console.log('✓ Claude Code restored successfully');
+      } else {
+        console.error('✗ Restore failed - backup file not found');
+        process.exit(1);
+      }
+    } catch (error) {
+      console.error('✗ Restore failed:', error instanceof Error ? error.message : String(error));
+      process.exit(1);
+    }
+    process.exit(0);
   }
 
   // Handle --apply flag for non-interactive mode

@@ -71,6 +71,12 @@ export interface PatchApplied {
   items: string[];
 }
 
+export interface PatchResult {
+  name: string;
+  success: boolean;
+  error?: string;
+}
+
 // Debug function for showing diffs (currently disabled)
 export const showDiff = (
   oldFileContents: string,
@@ -342,7 +348,7 @@ export const findBoxComponent = (fileContents: string): string | undefined => {
 export const applyCustomization = async (
   config: TweakccConfig,
   ccInstInfo: ClaudeCodeInstallationInfo
-): Promise<TweakccConfig> => {
+): Promise<{ config: TweakccConfig; patchResults: PatchResult[] }> => {
   let content: string;
 
   if (ccInstInfo.nativeInstallationPath) {
@@ -396,6 +402,28 @@ export const applyCustomization = async (
   }
 
   const items: string[] = [];
+  const patchResults: PatchResult[] = [];
+
+  // Helper function to track patch results
+  const trackPatch = (name: string, patchFn: () => string | null): string | null => {
+    try {
+      const result = patchFn();
+      if (result) {
+        patchResults.push({ name, success: true });
+        return result;
+      } else {
+        patchResults.push({ name, success: false, error: 'Patch function returned null/undefined' });
+        return null;
+      }
+    } catch (error) {
+      patchResults.push({
+        name,
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+      return null;
+    }
+  };
 
   // Apply system prompt customizations
   const systemPromptsResult = await applySystemPrompts(
@@ -405,41 +433,46 @@ export const applyCustomization = async (
   content = systemPromptsResult.newContent;
   items.push(...systemPromptsResult.items);
 
-  let result: string | null = null;
-
   // Apply themes
   if (config.settings.themes && config.settings.themes.length > 0) {
-    if ((result = writeThemes(content, config.settings.themes)))
-      content = result;
+    const result = trackPatch('themes', () => writeThemes(content, config.settings.themes));
+    if (result) content = result;
   }
 
   // Apply thinking verbs
   // prettier-ignore
   if (config.settings.thinkingVerbs) {
-    if ((result = writeThinkerVerbs(content, config.settings.thinkingVerbs.verbs)))
-      content = result;
-    if ((result = writeThinkerFormat(content, config.settings.thinkingVerbs.format)))
-      content = result;
+    const verbsResult = trackPatch('thinking-verbs', () =>
+      writeThinkerVerbs(content, config.settings.thinkingVerbs.verbs));
+    if (verbsResult) content = verbsResult;
+
+    const formatResult = trackPatch('thinking-format', () =>
+      writeThinkerFormat(content, config.settings.thinkingVerbs.format));
+    if (formatResult) content = formatResult;
   }
 
   // Apply thinking style
   // prettier-ignore
-  if ((result = writeThinkerSymbolChars(content, config.settings.thinkingStyle.phases)))
-    content = result;
-  // prettier-ignore
-  if ((result = writeThinkerSymbolSpeed(content, config.settings.thinkingStyle.updateInterval)))
-    content = result;
-  // prettier-ignore
-  if ((result = writeThinkerSymbolWidthLocation(content, Math.max(...config.settings.thinkingStyle.phases.map(p => p.length)) + 1)))
-    content = result;
-  // prettier-ignore
-  if ((result = writeThinkerSymbolMirrorOption(content, config.settings.thinkingStyle.reverseMirror)))
-    content = result;
+  const charsResult = trackPatch('thinking-chars', () =>
+    writeThinkerSymbolChars(content, config.settings.thinkingStyle.phases));
+  if (charsResult) content = charsResult;
+
+  const speedResult = trackPatch('thinking-speed', () =>
+    writeThinkerSymbolSpeed(content, config.settings.thinkingStyle.updateInterval));
+  if (speedResult) content = speedResult;
+
+  const widthResult = trackPatch('thinking-width', () =>
+    writeThinkerSymbolWidthLocation(content, Math.max(...config.settings.thinkingStyle.phases.map(p => p.length)) + 1));
+  if (widthResult) content = widthResult;
+
+  const mirrorResult = trackPatch('thinking-mirror', () =>
+    writeThinkerSymbolMirrorOption(content, config.settings.thinkingStyle.reverseMirror));
+  if (mirrorResult) content = mirrorResult;
 
   // Apply user message display customization
   if (config.settings.userMessageDisplay) {
-    if (
-      (result = writeUserMessageDisplay(
+    const userMessageResult = trackPatch('user-message-display', () =>
+      writeUserMessageDisplay(
         content,
         config.settings.userMessageDisplay.prefix.format,
         config.settings.userMessageDisplay.prefix.foreground_color,
@@ -462,10 +495,8 @@ export const applyCustomization = async (
           'strikethrough'
         ),
         config.settings.userMessageDisplay.message.styling.includes('inverse')
-      ))
-    ) {
-      content = result;
-    }
+      ));
+    if (userMessageResult) content = userMessageResult;
   }
 
   // Apply input box border customization
@@ -473,67 +504,73 @@ export const applyCustomization = async (
     config.settings.inputBox &&
     typeof config.settings.inputBox.removeBorder === 'boolean'
   ) {
-    if (
-      (result = writeInputBoxBorder(
+    const inputBorderResult = trackPatch('input-border', () =>
+      writeInputBoxBorder(
         content,
         config.settings.inputBox.removeBorder
-      ))
-    )
-      content = result;
+      ));
+    if (inputBorderResult) content = inputBorderResult;
   }
 
   // Apply verbose property patch (always true by default)
-  if ((result = writeVerboseProperty(content))) content = result;
+  const verboseResult = trackPatch('verbose-property', () => writeVerboseProperty(content));
+  if (verboseResult) content = verboseResult;
 
   // Apply spinner no-freeze patch (always enabled)
-  if ((result = writeSpinnerNoFreeze(content))) content = result;
+  const spinnerResult = trackPatch('spinner-no-freeze', () => writeSpinnerNoFreeze(content));
+  if (spinnerResult) content = spinnerResult;
 
   // Apply context limit patch (always enabled)
-  if ((result = writeContextLimit(content))) content = result;
+  const contextResult = trackPatch('context-limit', () => writeContextLimit(content));
+  if (contextResult) content = contextResult;
 
   // Apply model customizations (known names, mapping, selector options) (always enabled)
-  if ((result = writeModelCustomizations(content))) content = result;
+  const modelResult = trackPatch('model-customizations', () => writeModelCustomizations(content));
+  if (modelResult) content = modelResult;
 
   // Apply show more items in select menus patch (always enabled)
-  if ((result = writeShowMoreItemsInSelectMenus(content, 25))) content = result;
+  const showMoreResult = trackPatch('show-more-items', () => writeShowMoreItemsInSelectMenus(content, 25));
+  if (showMoreResult) content = showMoreResult;
 
   // Disable Max subscription gating for cost tool (always enabled)
-  if ((result = writeIgnoreMaxSubscription(content))) content = result;
+  const maxSubResult = trackPatch('ignore-max-subscription', () => writeIgnoreMaxSubscription(content));
+  if (maxSubResult) content = maxSubResult;
 
   // Apply thinking visibility patch (always enabled)
-  if ((result = writeThinkingVisibility(content))) content = result;
+  const thinkingVisResult = trackPatch('thinking-visibility', () => writeThinkingVisibility(content));
+  if (thinkingVisResult) content = thinkingVisResult;
 
   // Apply patches applied indication
   const showTweakccVersion = config.settings.misc?.showTweakccVersion ?? true;
   const showPatchesApplied = config.settings.misc?.showPatchesApplied ?? true;
-  if (
-    (result = writePatchesAppliedIndication(
+  const patchesIndicationResult = trackPatch('patches-applied-indication', () =>
+    writePatchesAppliedIndication(
       content,
       '3.1.0',
       items,
       showTweakccVersion,
       showPatchesApplied
-    ))
-  )
-    content = result;
+    ));
+  if (patchesIndicationResult) content = patchesIndicationResult;
 
   // Apply LSP support fixes (always enabled)
-  if ((result = writeFixLspSupport(content))) content = result;
+  const lspResult = trackPatch('fix-lsp-support', () => writeFixLspSupport(content));
+  if (lspResult) content = lspResult;
 
   // Apply toolset restrictions (enabled if toolsets configured)
   if (config.settings.toolsets && config.settings.toolsets.length > 0) {
-    if (
-      (result = writeToolsets(
+    const toolsetResult = trackPatch('toolsets', () =>
+      writeToolsets(
         content,
         config.settings.toolsets,
         config.settings.defaultToolset
-      ))
-    )
-      content = result;
+      ));
+    if (toolsetResult) content = toolsetResult;
   }
 
   // Apply conversation title management (always enabled)
-  if ((result = writeConversationTitle(content))) content = result;
+  const convTitleResult = trackPatch('conversation-title', () => writeConversationTitle(content));
+  if (convTitleResult) content = convTitleResult;
 
   // Write the modified content back
   if (ccInstInfo.nativeInstallationPath) {
@@ -567,7 +604,12 @@ export const applyCustomization = async (
     await replaceFileBreakingHardLinks(ccInstInfo.cliPath, content, 'patch');
   }
 
-  return await updateConfigFile(config => {
+  const updatedConfig = await updateConfigFile(config => {
     config.changesApplied = true;
   });
+
+  return {
+    config: updatedConfig,
+    patchResults
+  };
 };

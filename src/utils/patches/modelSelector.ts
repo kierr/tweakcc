@@ -2,77 +2,174 @@
 
 import { showDiff } from './index.js';
 
-// Models to inject/make available.
+// Note: The static CUSTOM_MODELS list has been replaced with dynamic fetching.
+// Models are now loaded from /v1/models API at runtime instead of being hardcoded.
+// Keeping this array empty maintains backward compatibility with existing patch functions.
 // prettier-ignore
-export const CUSTOM_MODELS: { label: string; slug: string; internal: string }[] = [
-  { label: 'Opus 4.1',            slug: 'opus-4.1',            internal: 'claude-opus-4-1-20250805' },
-  { label: 'Opus 4',              slug: 'opus-4',              internal: 'claude-opus-4-20250514' },
-  { label: 'Sonnet 4',            slug: 'sonnet-4',            internal: 'claude-sonnet-4-20250514' },
-  { label: 'Sonnet 3.7',          slug: 'sonnet-3.7',          internal: 'claude-3-7-sonnet-20250219' },
-  { label: 'Sonnet 3.5 (October)',slug: 'sonnet-3.5-october',  internal: 'claude-3-5-sonnet-20241022' },
-  { label: 'Sonnet 3.5 (June)',   slug: 'sonnet-3.5-june',     internal: 'claude-3-5-sonnet-20240620' },
-  { label: 'Haiku 3.5',           slug: 'haiku-3.5',           internal: 'claude-3-5-haiku-20241022' },
-  { label: 'Haiku 3',             slug: 'haiku-3',             internal: 'claude-3-haiku-20240307' },
-  { label: 'Opus 3',              slug: 'opus-3',              internal: 'claude-3-opus-20240229' },
-];
+export const CUSTOM_MODELS: { label: string; slug: string; internal: string }[] = [];
 
-const getModelSelectorInsertionPoint = (
-  oldFile: string
-): { insertionIndex: number; optionsVar: string } | null => {
-  const labelIndex = oldFile.indexOf('Switch between Claude models');
-  if (labelIndex === -1) {
-    console.error(
-      'patch: getModelSelectorInsertionPoint: failed to find labelIndex'
-    );
+// Note: The getModelSelectorInsertionPoint function has been removed
+// as we now use a global approach that doesn't require injecting into
+// React component state
+
+// 1) Inject one-time model fetching code at the end of the file (before S6I())
+const writeDynamicModelFetcher = (oldFile: string): string | null => {
+  // Find the S6I() call at the end of the file
+  const s6iCall = oldFile.indexOf('S6I();');
+  if (s6iCall === -1) {
+    console.error('patch: writeDynamicModelFetcher: failed to find S6I() call');
     return null;
   }
 
-  const searchStart = Math.max(0, labelIndex - 600);
-  const searchEnd = labelIndex;
-  const chunk = oldFile.slice(searchStart, searchEnd);
+  const inject = `
+// ========================================
+// Dynamic Model Fetching - One-time on launch
+// ========================================
+if (!global.claude_models_hardcoded) {
+  global.claude_models_hardcoded = null;
 
-  const m = chunk.match(
-    /\[[$\w]+,\s*[$\w]+\]\s*=\s*[$\w]+\.useState\([^)]*\)\s*,\s*([$\w]+)=/
-  );
-  if (!m || m.index === undefined) {
-    console.error(
-      'patch: getModelSelectorInsertionPoint: failed to find useState'
-    );
-    return null;
-  }
+  (async () => {
+    try {
+      // Check for API key in both common environment variable names
+      const apiKey = process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN;
+      if (process.env.DEBUG) console.log('[MODEL-FETCH] API key found:', apiKey ? 'YES' : 'NO');
+      if (!apiKey) {
+        if (process.env.DEBUG) console.log('[MODEL-FETCH] No API key - /model will show minimal options');
+        return;
+      }
 
-  const absStart = searchStart + m.index;
-  let i = absStart;
-  while (i < oldFile.length && oldFile[i] !== ';') i++;
-  if (i >= oldFile.length) {
-    console.error(
-      'patch: getModelSelectorInsertionPoint: failed to find semicolon'
-    );
-    return null;
-  }
-  const insertionIndex = i + 1; // right after the semicolon
+      const baseURL = process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com';
+      const modelsUrl = baseURL + '/v1/models?beta=true';
+      const headers = {
+        'Authorization': 'Bearer ' + apiKey,
+        'Content-Type': 'application/json',
+        'anthropic-beta': 'models-2023-06-01'
+      };
 
-  const optionsVar = m[1];
-  return { insertionIndex, optionsVar };
-};
+      if (process.env.DEBUG) console.log('[MODEL-FETCH] Making API call to:', modelsUrl);
+      const response = await DB.get(modelsUrl, { headers });
+      if (process.env.DEBUG) console.log('[MODEL-FETCH] API response received');
 
-const writeModelSelectorOptions = (oldFile: string): string | null => {
-  const found = getModelSelectorInsertionPoint(oldFile);
-  if (!found) return null;
+      const models = response.data?.data || response.data || [];
+      if (process.env.DEBUG) console.log('[MODEL-FETCH] Models count:', models.length);
 
-  const { insertionIndex, optionsVar } = found;
+      if (models.length > 0) {
+        const modelOptions = [];
+        const seenModelIds = new Set();  // Deduplicate by model ID
 
-  const inject = CUSTOM_MODELS.map(m => {
-    const label = JSON.stringify(m.label);
-    const value = JSON.stringify(m.slug);
-    return `${optionsVar}.push({value:${value},label:${label}});`;
-  }).join('');
+        models.forEach((model) => {
+          const modelId = model.id;
+
+          // Create prettier display name
+          let displayName = model.display_name || modelId;
+
+          // Clean up the display name
+          displayName = displayName
+            .replace(/^chutes,/i, 'Chutes - ')   // Convert "chutes," to "Chutes - "
+            .replace(/^minimax-anthropic,/i, 'MiniMax Anthropic - ')  // Convert prefix
+            .replace(/\b([a-z])/g, (m, p1) => p1.toUpperCase())  // Title case lowercase letters
+            .replace('Ai', 'AI')  // Fix common acronym
+            .replace(/\s+/g, ' ')            // Clean up multiple spaces
+            .trim();
+
+          // Deduplicate by canonical model name (after cleaning)
+          if (seenModelIds.has(displayName)) {
+            if (process.env.DEBUG) console.log('[MODEL-FETCH] Skipping duplicate display name:', displayName);
+            return;
+          }
+          seenModelIds.add(displayName);
+
+          modelOptions.push({
+            value: modelId,
+            label: displayName,
+            description: 'Model ID: ' + modelId
+          });
+        });
+
+        // Sort with Opus priority, then alphabetically
+        modelOptions.sort((a, b) => {
+          const priority = { 'opus': 0, 'sonnet': 1, 'haiku': 2 };
+          const aType = Object.keys(priority).find(t => a.label.toLowerCase().includes(t)) || 99;
+          const bType = Object.keys(priority).find(t => b.label.toLowerCase().includes(t)) || 99;
+
+          // First, sort by priority (opus > sonnet > haiku)
+          if (priority[aType] !== priority[bType]) {
+            return priority[aType] - priority[bType];
+          }
+
+          // Then alphabetically within same priority
+          return a.label.localeCompare(b.label, undefined, { sensitivity: 'base' });
+        });
+
+        // Add default option at the beginning
+        modelOptions.unshift({
+          value: null,
+          label: "Default (recommended)",
+          description: "Use the default model"
+        });
+
+        global.claude_models_hardcoded = modelOptions;
+        if (process.env.DEBUG) console.log('[MODEL-FETCH] Loaded ' + models.length + ' models from API (one-time on launch)');
+      }
+    } catch (error) {
+      if (process.env.DEBUG) console.log('[MODEL-FETCH] API call failed:', error.message);
+    }
+  })();
+}
+
+`;
 
   const newFile =
-    oldFile.slice(0, insertionIndex) + inject + oldFile.slice(insertionIndex);
-  showDiff(oldFile, newFile, inject, insertionIndex, insertionIndex);
+    oldFile.slice(0, s6iCall) + inject + oldFile.slice(s6iCall);
+  showDiff(oldFile, newFile, inject, s6iCall, s6iCall);
   return newFile;
 };
+
+// 2) Add fallback logic to ht4() function to check global models first
+const writeHt4Fallback = (oldFile: string): string | null => {
+  // Find the ht4() function definition
+  const ht4Match = oldFile.match(/function ht4\(\)\s*\{/);
+  if (!ht4Match || ht4Match.index === undefined) {
+    console.error('patch: writeHt4Fallback: failed to find ht4() function');
+    return null;
+  }
+
+  const functionStart = ht4Match.index;
+  const braceIndex = functionStart + ht4Match[0].length - 1; // position of opening brace
+
+  const inject = `
+  // Return models from one-time fetch if available
+  if (global.claude_models_hardcoded) {
+    return global.claude_models_hardcoded;
+  }
+
+  // Otherwise use original hardcoded logic
+`;
+
+  const newFile =
+    oldFile.slice(0, braceIndex + 1) + inject + oldFile.slice(braceIndex + 1);
+  showDiff(oldFile, newFile, inject, braceIndex + 1, braceIndex + 1);
+  return newFile;
+};
+
+// 3) Increase the visible model list limit from 10 to 100
+const writeVisibleLimitPatch = (oldFile: string): string | null => {
+  // Find the line with "F = 10," and replace it
+  const fLineMatch = oldFile.match(/F\s*=\s*10,/);
+  if (!fLineMatch || fLineMatch.index === undefined) {
+    console.error('patch: writeVisibleLimitPatch: failed to find F = 10 line');
+    return null;
+  }
+
+  const updatedLine = 'F = 100,';
+  const newFile =
+    oldFile.slice(0, fLineMatch.index) +
+    updatedLine +
+    oldFile.slice(fLineMatch.index + fLineMatch[0].length);
+  showDiff(oldFile, newFile, updatedLine, fLineMatch.index, fLineMatch.index + updatedLine.length);
+  return newFile;
+};
+
 
 // 2) Extend the known model names list (sB2=[...]) to include our lowercased friendly names
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -210,8 +307,17 @@ export const writeModelCustomizations = (oldFile: string): string | null => {
   // const b = writeModelSwitchMapping(updated);
   // if (b) updated = b;
 
-  const c = writeModelSelectorOptions(updated);
+  // 1) Inject one-time model fetching code at the end of the file
+  const c = writeDynamicModelFetcher(updated);
   if (c) updated = c;
+
+  // 2) Add fallback logic to ht4() function
+  const d = writeHt4Fallback(updated);
+  if (d) updated = d;
+
+  // 3) Increase visible model list limit from 10 to 100
+  const e = writeVisibleLimitPatch(updated);
+  if (e) updated = e;
 
   return updated === oldFile ? null : updated;
 };

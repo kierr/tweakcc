@@ -25,6 +25,9 @@ const writeDynamicModelFetcher = (oldFile: string): string | null => {
 // ========================================
 // Dynamic Model Fetching - One-time on launch
 // ========================================
+// Always reset cache on launch to ensure fresh fetch with current env vars
+global.claude_models_hardcoded = null;
+
 if (!global.claude_models_hardcoded) {
   global.claude_models_hardcoded = null;
 
@@ -60,19 +63,10 @@ if (!global.claude_models_hardcoded) {
         models.forEach((model) => {
           const modelId = model.id;
 
-          // Create prettier display name
-          let displayName = model.display_name || modelId;
+          // Use the API's display_name as-is
+          const displayName = model.display_name || modelId;
 
-          // Clean up the display name
-          displayName = displayName
-            .replace(/^chutes,/i, 'Chutes - ')   // Convert "chutes," to "Chutes - "
-            .replace(/^minimax-anthropic,/i, 'MiniMax Anthropic - ')  // Convert prefix
-            .replace(/\b([a-z])/g, (m, p1) => p1.toUpperCase())  // Title case lowercase letters
-            .replace('Ai', 'AI')  // Fix common acronym
-            .replace(/\s+/g, ' ')            // Clean up multiple spaces
-            .trim();
-
-          // Deduplicate by canonical model name (after cleaning)
+          // Deduplicate by display name
           if (seenModelIds.has(displayName)) {
             if (process.env.DEBUG) console.log('[MODEL-FETCH] Skipping duplicate display name:', displayName);
             return;
@@ -81,24 +75,8 @@ if (!global.claude_models_hardcoded) {
 
           modelOptions.push({
             value: modelId,
-            label: displayName,
-            description: 'Model ID: ' + modelId
+            label: displayName
           });
-        });
-
-        // Sort with Opus priority, then alphabetically
-        modelOptions.sort((a, b) => {
-          const priority = { 'opus': 0, 'sonnet': 1, 'haiku': 2 };
-          const aType = Object.keys(priority).find(t => a.label.toLowerCase().includes(t)) || 99;
-          const bType = Object.keys(priority).find(t => b.label.toLowerCase().includes(t)) || 99;
-
-          // First, sort by priority (opus > sonnet > haiku)
-          if (priority[aType] !== priority[bType]) {
-            return priority[aType] - priority[bType];
-          }
-
-          // Then alphabetically within same priority
-          return a.label.localeCompare(b.label, undefined, { sensitivity: 'base' });
         });
 
         // Add default option at the beginning
@@ -152,16 +130,28 @@ const writeHt4Fallback = (oldFile: string): string | null => {
   return newFile;
 };
 
-// 3) Increase the visible model list limit from 10 to 100
+// 3) Increase the visible model list limit from 10 to 15 (show all)
 const writeVisibleLimitPatch = (oldFile: string): string | null => {
-  // Find the line with "F = 10," and replace it
+  // First, try to find and replace F = 10, C = Math.min(10, J.length)
+  const pattern1 = oldFile.match(/F\s*=\s*10,\s*C\s*=\s*Math\.min\(10,\s*J\.length\)/);
+  if (pattern1 && pattern1.index !== undefined) {
+    const updated = 'F = 10,\n        C = Math.min(10, J.length)';
+    const newFile =
+      oldFile.slice(0, pattern1.index) +
+      updated +
+      oldFile.slice(pattern1.index + pattern1[0].length);
+    showDiff(oldFile, newFile, updated, pattern1.index, pattern1.index + updated.length);
+    return newFile;
+  }
+
+  // Fallback: Just replace F = 10
   const fLineMatch = oldFile.match(/F\s*=\s*10,/);
   if (!fLineMatch || fLineMatch.index === undefined) {
     console.error('patch: writeVisibleLimitPatch: failed to find F = 10 line');
     return null;
   }
 
-  const updatedLine = 'F = 100,';
+  const updatedLine = 'F = 10,';
   const newFile =
     oldFile.slice(0, fLineMatch.index) +
     updatedLine +
@@ -315,7 +305,7 @@ export const writeModelCustomizations = (oldFile: string): string | null => {
   const d = writeHt4Fallback(updated);
   if (d) updated = d;
 
-  // 3) Increase visible model list limit from 10 to 100
+  // 3) Keep visible model list limit at 10
   const e = writeVisibleLimitPatch(updated);
   if (e) updated = e;
 

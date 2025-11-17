@@ -120,3 +120,4 @@ Individual patches live in `src/utils/patches/`:
 - `CHANGELOG.md` - Version history with semantic versioning
 - `package.json` - Dependencies and scripts
 - `data/prompts/` - JSON files with default system prompts for each CC version
+- bun run build && bun run start --restore && bun run start --apply && claude "Use Task tool, set param for model to 'zen,grok-code', general agent type, ask it to generate a haiku about claude" <--- this is n example of how to test patches after making changes

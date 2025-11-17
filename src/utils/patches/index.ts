@@ -53,6 +53,7 @@ import { applySystemPrompts } from './systemPrompts.js';
 import { writeFixLspSupport } from './fixLspSupport.js';
 import { writeToolsets } from './toolsets.js';
 import { writeConversationTitle } from './conversationTitle.js';
+import { writeTaskToolModelSchemaCustomization } from './taskToolModelSchema.js';
 
 export interface LocationResult {
   startIndex: number;
@@ -571,6 +572,10 @@ export const applyCustomization = async (
   // Apply conversation title management (always enabled)
   const convTitleResult = trackPatch('conversation-title', () => writeConversationTitle(content));
   if (convTitleResult) content = convTitleResult;
+
+  // Apply Task tool model schema customization (always enabled)
+  const taskToolModelResult = trackPatch('task-tool-model-schema', () => writeTaskToolModelSchemaCustomization(content));
+  if (taskToolModelResult) content = taskToolModelResult;
 
   // Write the modified content back
   if (ccInstInfo.nativeInstallationPath) {

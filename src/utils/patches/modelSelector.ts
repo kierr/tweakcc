@@ -25,9 +25,6 @@ const writeDynamicModelFetcher = (oldFile: string): string | null => {
 // ========================================
 // Dynamic Model Fetching - One-time on launch
 // ========================================
-// Always reset cache on launch to ensure fresh fetch with current env vars
-global.claude_models_hardcoded = null;
-
 if (!global.claude_models_hardcoded) {
   global.claude_models_hardcoded = null;
 

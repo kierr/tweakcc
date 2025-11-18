@@ -29,6 +29,7 @@ import {
   clearAllAppliedHashes,
 } from './systemPromptHashIndex.js';
 import { extractClaudeJsFromNativeInstallation } from './nativeInstallation.js';
+import { validateTweakccConfig, formatValidationErrors } from './validation-simple.js';
 
 export const ensureConfigDir = async (): Promise<void> => {
   await fs.mkdir(CONFIG_DIR, { recursive: true });
@@ -176,6 +177,29 @@ export const readConfigFile = async (): Promise<TweakccConfig> => {
       readConfig.changesApplied = false;
     }
 
+    // Validate the configuration before returning
+    const validation = validateTweakccConfig(readConfig);
+    if (!validation.isValid) {
+      console.error(formatValidationErrors(validation.errors));
+
+      // For non-critical validation errors, we can try to fix them by merging with defaults
+      // but for critical errors, we should throw an exception
+      const criticalErrors = validation.errors.filter(error =>
+        error.field.includes('settings.themes') ||
+        error.field.includes('settings.toolsets')
+      );
+
+      if (criticalErrors.length > 0) {
+        throw new Error(`Critical configuration validation errors:\n${formatValidationErrors(criticalErrors)}`);
+      }
+
+      // For non-critical errors, log a warning but continue
+      const nonCriticalErrors = validation.errors.filter(error => !criticalErrors.includes(error));
+      if (nonCriticalErrors.length > 0) {
+        console.warn(`Configuration validation warnings:\n${formatValidationErrors(nonCriticalErrors)}`);
+      }
+    }
+
     lastConfig = readConfig;
     return readConfig;
   } catch (error) {
@@ -197,6 +221,29 @@ export const updateConfigFile = async (
   }
   updateFn(lastConfig);
   lastConfig.lastModified = new Date().toISOString();
+
+  // Validate the configuration before saving
+  const validation = validateTweakccConfig(lastConfig);
+  if (!validation.isValid) {
+    console.error(formatValidationErrors(validation.errors));
+
+    // For critical errors, throw an exception before saving
+    const criticalErrors = validation.errors.filter(error =>
+      error.field.includes('settings.themes') ||
+      error.field.includes('settings.toolsets')
+    );
+
+    if (criticalErrors.length > 0) {
+      throw new Error(`Critical configuration validation errors:\n${formatValidationErrors(criticalErrors)}`);
+    }
+
+    // For non-critical errors, log a warning but continue
+    const nonCriticalErrors = validation.errors.filter(error => !criticalErrors.includes(error));
+    if (nonCriticalErrors.length > 0) {
+      console.warn(`Configuration validation warnings:\n${formatValidationErrors(nonCriticalErrors)}`);
+    }
+  }
+
   await saveConfig(lastConfig);
   return lastConfig;
 };

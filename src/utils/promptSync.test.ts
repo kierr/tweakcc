@@ -1,10 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import * as fs from 'node:fs/promises';
 import * as promptSync from './promptSync.js';
 import type { StringsPrompt, StringsFile } from './promptSync.js';
-
-vi.mock('node:fs/promises');
-vi.mock('./download.js');
 
 const createEnoent = () => {
   const error: NodeJS.ErrnoException = new Error(
@@ -699,7 +697,7 @@ Greet user as \${SETTINGS.preferredName}!`;
       const { downloadStringsFile } = await import('./download.js');
       const hashIndexModule = await import('./systemPromptHashIndex.js');
 
-      vi.mocked(downloadStringsFile).mockResolvedValue(
+      (downloadStringsFile as any).mockResolvedValue(
         mockOldStringsFile as StringsFile
       );
       vi.spyOn(hashIndexModule, 'getPromptHash').mockResolvedValue(
@@ -771,7 +769,7 @@ Greet user as \${SETTINGS.preferredName}!`;
       const { downloadStringsFile } = await import('./download.js');
       const hashIndexModule = await import('./systemPromptHashIndex.js');
 
-      vi.mocked(downloadStringsFile).mockResolvedValue(
+      (downloadStringsFile as any).mockResolvedValue(
         mockStringsFile as StringsFile
       );
       vi.spyOn(hashIndexModule, 'storeHashes').mockResolvedValue(0);
@@ -805,7 +803,7 @@ Greet user as \${SETTINGS.preferredName}!`;
       };
 
       const { downloadStringsFile } = await import('./download.js');
-      vi.mocked(downloadStringsFile).mockResolvedValue(
+      (downloadStringsFile as any).mockResolvedValue(
         mockStringsFile as StringsFile
       );
 
@@ -824,7 +822,7 @@ Greet user as \${SETTINGS.preferredName}!`;
 
     it('should throw error if download fails', async () => {
       const { downloadStringsFile } = await import('./download.js');
-      vi.mocked(downloadStringsFile).mockRejectedValue(
+      (downloadStringsFile as any).mockRejectedValue(
         new Error('Download failed')
       );
 

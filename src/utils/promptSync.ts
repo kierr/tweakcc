@@ -9,6 +9,7 @@ import {
   computeMD5Hash,
 } from './systemPromptHashIndex.js';
 import chalk from 'chalk';
+import { validateStringsFile, formatPromptValidationResults } from './promptValidation.js';
 
 /**
  * Prompt structure from strings-X.Y.Z.json files
@@ -152,8 +153,22 @@ export const reconstructContentFromPieces = (
     // Add the identifier placeholder if there's a corresponding identifier
     if (i < identifiers.length) {
       const labelIndex = identifiers[i];
-      const humanName =
-        identifierMap[String(labelIndex)] || `UNKNOWN_${labelIndex}`;
+      const mappedValue = identifierMap[String(labelIndex)];
+
+      let humanName: string;
+      if (mappedValue) {
+        // Check if it's a TODO/PLACEHOLDER that should be flagged
+        if (mappedValue === 'TODO_TOOL_OBJECT') {
+          humanName = '[TODO: Define tool object]';
+        } else if (mappedValue.includes('TODO') || mappedValue.includes('PLACEHOLDER')) {
+          humanName = `[PLACEHOLDER: ${mappedValue}]`;
+        } else {
+          humanName = mappedValue;
+        }
+      } else {
+        humanName = `[MISSING_IDENTIFIER: ${labelIndex}]`;
+      }
+
       result += humanName;
     }
   }
@@ -934,6 +949,24 @@ export const syncSystemPrompts = async (
 
   // Download strings file for current CC version
   const stringsFile = await downloadStringsFile(ccVersion);
+
+  // Validate the strings file for missing/invalid data
+  const validation = validateStringsFile(stringsFile);
+
+  // Display validation warnings for placeholders and issues
+  if (validation.warnings.length > 0) {
+    console.log(chalk.yellow('⚠️  Prompt validation warnings:'));
+    const warningMessages = formatPromptValidationResults(validation);
+    warningMessages.forEach(message => console.log(chalk.yellow(`  ${message}`)));
+  }
+
+  // Fail fast on critical validation errors
+  if (!validation.isValid) {
+    console.log(chalk.red('❌ Critical prompt validation errors found:'));
+    const errorMessages = formatPromptValidationResults(validation);
+    errorMessages.forEach(message => console.log(chalk.red(`  ${message}`)));
+    throw new Error('Prompt validation failed. See errors above for details.');
+  }
 
   // Store hashes for all prompts in this version
   await storeHashes(stringsFile);

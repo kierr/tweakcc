@@ -58,6 +58,7 @@ export const writeSlashCommandDefinition = (
   commandDef: string
 ): string | null => {
   const arrayEnd = findSlashCommandListEndPosition(oldFile);
+
   if (arrayEnd === null) {
     console.error(
       'patch: writeSlashCommandDefinition: failed to find slash command array end position'

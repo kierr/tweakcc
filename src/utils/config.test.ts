@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import * as config from './config.js';
 import {
   ClaudeCodeInstallationInfo,
@@ -12,19 +12,6 @@ import type { Stats } from 'node:fs';
 import path from 'node:path';
 import * as misc from './misc.js';
 import * as systemPromptHashIndex from './systemPromptHashIndex.js';
-
-vi.mock('node:fs/promises');
-
-// Mock the replaceFileBreakingHardLinks function
-vi.spyOn(misc, 'replaceFileBreakingHardLinks').mockImplementation(
-  async (filePath, content) => {
-    // Simulate the function by calling the mocked fs.writeFile
-    await fs.writeFile(filePath, content);
-  }
-);
-
-// Mock the checkRestorePermissions function
-vi.spyOn(misc, 'checkRestorePermissions').mockResolvedValue(true);
 
 // Mock fs functions - will be reset in each test if needed
 
@@ -52,6 +39,15 @@ describe('config.ts', () => {
       systemPromptHashIndex,
       'hasUnappliedSystemPromptChanges'
     ).mockResolvedValue(false);
+    // Mock the replaceFileBreakingHardLinks function
+    vi.spyOn(misc, 'replaceFileBreakingHardLinks').mockImplementation(
+      async (filePath, content) => {
+        // Simulate the function by calling the mocked fs.writeFile
+        await fs.writeFile(filePath, content);
+      }
+    );
+    // Mock the checkRestorePermissions function
+    vi.spyOn(misc, 'checkRestorePermissions').mockResolvedValue(true);
   });
 
   describe('ensureConfigDir', () => {

@@ -577,6 +577,10 @@ export const applyCustomization = async (
   const taskToolModelResult = trackPatch('task-tool-model-schema', () => writeTaskToolModelSchemaCustomization(content));
   if (taskToolModelResult) content = taskToolModelResult;
 
+  // Apply hax debug console (disabled - template literal escaping issues)
+  // const haxResult = trackPatch('hax-console', () => writeHaxSlashCommand(content));
+  // if (haxResult) content = haxResult;
+
   // Write the modified content back
   if (ccInstInfo.nativeInstallationPath) {
     // For native installations: repack the modified claude.js back into the binary

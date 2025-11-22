@@ -11,7 +11,7 @@ import {
 } from './utils/types.js';
 import { startupCheck, readConfigFile, backupClijs, backupNativeBinary, restoreClijsFromBackup, restoreNativeBinaryFromBackup } from './utils/config.js';
 import { enableDebug } from './utils/misc.js';
-import { applyCustomization } from './utils/patches/index.js';
+import { applyCustomization, PatchResult } from './utils/patches/index.js';
 import { preloadStringsFile } from './utils/promptSync.js';
 
 const createExampleConfigIfMissing = async (
@@ -49,8 +49,7 @@ const main = async () => {
     .version('3.1.1')
     .option('-d, --debug', 'enable debug mode')
     .option('-a, --apply', 'apply saved customizations without interactive UI')
-    .option('--backup', 'create a backup of the current Claude Code installation')
-    .option('--restore', 'restore Claude Code from backup (original state)');
+    .option('--backup', 'create a backup of the current Claude Code installation');
   program.parse();
   const options = program.opts();
 
@@ -85,38 +84,6 @@ const main = async () => {
     process.exit(0);
   }
 
-  // Handle --restore flag
-  if (options.restore) {
-    console.log('Restoring Claude Code from backup...');
-
-    // Find Claude Code installation
-    const startupCheckInfo = await startupCheck();
-
-    if (!startupCheckInfo || !startupCheckInfo.ccInstInfo) {
-      console.error('Cannot find Claude Code installation');
-      process.exit(1);
-    }
-
-    try {
-      let success = false;
-      if (startupCheckInfo.ccInstInfo.nativeInstallationPath) {
-        success = await restoreNativeBinaryFromBackup(startupCheckInfo.ccInstInfo);
-      } else {
-        success = await restoreClijsFromBackup(startupCheckInfo.ccInstInfo);
-      }
-
-      if (success) {
-        console.log('✓ Claude Code restored successfully');
-      } else {
-        console.error('✗ Restore failed - backup file not found');
-        process.exit(1);
-      }
-    } catch (error) {
-      console.error('✗ Restore failed:', error instanceof Error ? error.message : String(error));
-      process.exit(1);
-    }
-    process.exit(0);
-  }
 
   // Handle --apply flag for non-interactive mode
   if (options.apply) {
@@ -177,12 +144,12 @@ const main = async () => {
 
     // Preload strings file for system prompts
     console.log('Loading system prompts...');
-    const result = await preloadStringsFile(
+    const preloadResult = await preloadStringsFile(
       startupCheckInfo.ccInstInfo.version
     );
-    if (!result.success) {
+    if (!preloadResult.success) {
       console.log(chalk.red('\n✖ Error downloading system prompts:'));
-      console.log(chalk.red(`  ${result.errorMessage}`));
+      console.log(chalk.red(`  ${preloadResult.errorMessage}`));
       console.log(
         chalk.yellow(
           '\n⚠ System prompts not available - skipping system prompt customizations'
@@ -192,8 +159,21 @@ const main = async () => {
 
     // Apply the customizations
     console.log('Applying customizations...');
-    await applyCustomization(config, startupCheckInfo.ccInstInfo);
-    console.log('Customizations applied successfully!');
+    const result = await applyCustomization(config, startupCheckInfo.ccInstInfo);
+
+    // Check for failed patches
+    const failedPatches = result.patchResults.filter(p => !p.success);
+    if (failedPatches.length > 0) {
+      console.error(chalk.red('\n✖ Failed to apply patches:'));
+      failedPatches.forEach(patch => {
+        console.error(chalk.red(`  - ${patch.name}: ${patch.error || 'Unknown error'}`));
+      });
+      console.error(chalk.red('\nPatching failed. Claude Code was NOT modified.'));
+      console.error(chalk.red('Please report this issue at https://github.com/Piebald-AI/tweakcc/issues'));
+      process.exit(1);
+    }
+
+    console.log(chalk.green('✓ Customizations applied successfully!'));
     process.exit(0);
   }
 

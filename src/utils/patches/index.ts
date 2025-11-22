@@ -437,25 +437,12 @@ export const applyCustomization = async (
   let content: string;
 
   if (ccInstInfo.nativeInstallationPath) {
-    // For native installations: restore the binary, then extract to memory
-    await restoreNativeBinaryFromBackup(ccInstInfo);
-
-    // Extract from backup if it exists, otherwise from the native installation
-    let backupExists = false;
-    try {
-      await fs.stat(NATIVE_BINARY_BACKUP_FILE);
-      backupExists = true;
-    } catch {
-      // Backup doesn't exist, extract from native installation
-    }
-
-    const pathToExtractFrom = backupExists
-      ? NATIVE_BINARY_BACKUP_FILE
-      : ccInstInfo.nativeInstallationPath;
+    // For native installations: extract directly from the binary (no restore needed)
+    const pathToExtractFrom = ccInstInfo.nativeInstallationPath;
 
     if (isDebug()) {
       console.log(
-        `Extracting claude.js from ${backupExists ? 'backup' : 'native installation'}: ${pathToExtractFrom}`
+        `Extracting claude.js from native installation: ${pathToExtractFrom}`
       );
     }
 
@@ -476,9 +463,7 @@ export const applyCustomization = async (
 
     content = claudeJsBuffer.toString('utf8');
   } else {
-    // For NPM installations: restore cli.js from backup, then read it
-    await restoreClijsFromBackup(ccInstInfo);
-
+    // For NPM installations: read cli.js directly (no restore needed)
     if (!ccInstInfo.cliPath) {
       throw new Error('cliPath is required for NPM installations');
     }

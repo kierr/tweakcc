@@ -8,28 +8,83 @@ function getThemesLocation(oldFile: string): {
   objArr: LocationResult;
   obj: LocationResult;
 } | null {
-  // Look for switch statement pattern: switch(A){case"light":return ...;}
-  const switchPattern =
-    /switch\s*\(([^)]+)\)\s*\{[^}]*case\s*["']light["'][^}]+\}/s;
-  const switchMatch = oldFile.match(switchPattern);
+  // Look for switch statement pattern with multiple fallbacks
+  let switchMatch = oldFile.match(/switch\s*\(([^)]+)\)\s*\{[^}]*case\s*["']light["'][^}]+\}/s);
 
   if (!switchMatch || switchMatch.index == undefined) {
-    console.error('patch: themes: failed to find switchMatch');
+    // Fallback 1: Look for switch with theme-like cases
+    const themeCases = ['light', 'dark', 'auto', 'theme'];
+    for (const theme of themeCases) {
+      const pattern = new RegExp(`switch\\s*\\(([^)]+)\\)\\s*\\{[^}]*case\\s*["']${theme}["'][^}]+\\}`, 's');
+      switchMatch = oldFile.match(pattern);
+      if (switchMatch && switchMatch.index !== undefined) {
+        console.log(`patch: themes: using fallback switch pattern with theme '${theme}'`);
+        break;
+      }
+    }
+  }
+
+  if (!switchMatch || switchMatch.index == undefined) {
+    // Fallback 2: Look for any switch statement with string cases
+    const genericSwitchPattern = /switch\s*\(([^)]+)\)\s*\{[^}]*case\s*["'][^"']+["'][^}]+\}/s;
+    switchMatch = oldFile.match(genericSwitchPattern);
+    if (switchMatch && switchMatch.index !== undefined) {
+      console.log('patch: themes: using generic switch pattern');
+    }
+  }
+
+  if (!switchMatch || switchMatch.index == undefined) {
+    console.error('patch: themes: failed to find any switch statement');
     return null;
   }
 
-  const objArrPat = /\[(?:\{label:"(?:Dark|Light).+?",value:".+?"\},?)+\]/;
-  const objPat = /return\{(?:[$\w]+?:"(?:Dark|Light).+?",?)+\}/;
-  const objArrMatch = oldFile.match(objArrPat);
-  const objMatch = oldFile.match(objPat);
+  // Find theme options array with multiple patterns
+  let objArrMatch = oldFile.match(/\[(?:\{label:"(?:Dark|Light).+?",value:".+?"\},?)+\]/);
 
   if (!objArrMatch || objArrMatch.index == undefined) {
-    console.error('patch: themes: failed to find objArrMatch');
+    // Fallback: Look for arrays with theme-like objects
+    const themeArrayPatterns = [
+      /\[(?:\{label:[^}]*theme[^}]*value:[^}]+\},?)+\]/i,
+      /\[(?:\{[^}]*label:[^}]*value:[^}]*\},?)+\]/,
+      /\[(?:\{[^}]*"label"[^}]*"value"[^}]+\},?)+\]/
+    ];
+
+    for (const pattern of themeArrayPatterns) {
+      objArrMatch = oldFile.match(pattern);
+      if (objArrMatch && objArrMatch.index !== undefined) {
+        console.log('patch: themes: using fallback array pattern');
+        break;
+      }
+    }
+  }
+
+  if (!objArrMatch || objArrMatch.index == undefined) {
+    console.error('patch: themes: failed to find theme options array');
     return null;
+  }
+
+  // Find theme mapping object with multiple patterns
+  let objMatch = oldFile.match(/return\{(?:[$\w]+?:"(?:Dark|Light).+?",?)+\}/);
+
+  if (!objMatch || objMatch.index == undefined) {
+    // Fallback: Look for return objects with theme mappings
+    const themeObjectPatterns = [
+      /return\{(?:[$\w]+?:"[^"]+",?)+\}/,
+      /return\{(?:[$\w]+?:[^,}]+,?)+\}/,
+      /return\s*\{[^}]*theme[^}]*\}/i
+    ];
+
+    for (const pattern of themeObjectPatterns) {
+      objMatch = oldFile.match(pattern);
+      if (objMatch && objMatch.index !== undefined) {
+        console.log('patch: themes: using fallback object pattern');
+        break;
+      }
+    }
   }
 
   if (!objMatch || objMatch.index == undefined) {
-    console.error('patch: themes: failed to find objMatch');
+    console.error('patch: themes: failed to find theme mapping object');
     return null;
   }
 
@@ -51,16 +106,56 @@ function getThemesLocation(oldFile: string): {
 }
 
 /**
- * Get the function name that provides theme colors
+ * Get the function name that provides theme colors with multiple fallbacks
  */
 const getColorsFunctionName = (oldFile: string): string | null => {
   // Look for function like: function JS0(A){switch(A){case"light":return{...}}}
-  const pattern = /function ([$\w]+)\(A\)\{switch\(A\)\{case"light":return\{/;
-  const match = oldFile.match(pattern);
+  let pattern = /function ([$\w]+)\(A\)\{switch\(A\)\{case"light":return\{/;
+  let match = oldFile.match(pattern);
+
   if (!match) {
-    console.error('patch: themes: could not find theme colors function name');
+    // Fallback 1: Look for function with theme switch cases
+    const themeCases = ['light', 'dark', 'auto', 'theme'];
+    for (const theme of themeCases) {
+      pattern = new RegExp(`function ([\\$\\w]+)\\([\\$\\w]*\\)\\{switch\\([^}]*case["']${theme}["']:return\\{`);
+      match = oldFile.match(pattern);
+      if (match) {
+        console.log(`patch: themes: using fallback colors function pattern with theme '${theme}'`);
+        break;
+      }
+    }
+  }
+
+  if (!match) {
+    // Fallback 2: Look for any function with switch and return object
+    pattern = /function ([$\w]+)\([$\w]*\)\{switch\([^}]*case[^}]*return\{/;
+    match = oldFile.match(pattern);
+    if (match) {
+      console.log('patch: themes: using generic colors function pattern');
+    }
+  }
+
+  if (!match) {
+    // Fallback 3: Look for arrow functions or const assignments with switch
+    const arrowPatterns = [
+      /(?:const|let|var)\s+([$\w]+)\s*=\s*\([$\w]*\)\s*=>\s*\{[^}]*switch/,
+      /(?:const|let|var)\s+([$\w]+)\s*=\s*function\s*\([$\w]*\)\s*\{[^}]*switch/
+    ];
+
+    for (const arrowPattern of arrowPatterns) {
+      match = oldFile.match(arrowPattern);
+      if (match) {
+        console.log('patch: themes: using arrow/const function pattern');
+        break;
+      }
+    }
+  }
+
+  if (!match) {
+    console.error('patch: themes: could not find any theme colors function');
     return null;
   }
+
   return match[1];
 };
 
@@ -118,7 +213,8 @@ export const writeThemes = (
 ): string | null => {
   const locations = getThemesLocation(oldFile);
   if (!locations) {
-    return null;
+    console.log('patch: themes: failed to find theme locations, skipping theme customization...');
+    return null; // Return null to indicate no changes made, but don't break the patch chain
   }
 
   if (themes.length === 0) {

@@ -14,19 +14,49 @@ export const CUSTOM_MODELS: { label: string; slug: string; internal: string }[] 
 
 // 1) Inject one-time model fetching code at the end of the file (before S6I() or similar function call)
 const writeDynamicModelFetcher = (oldFile: string): string | null => {
-  // Find the S6I() call at the end of the file, or fallback to the last function call
+  // Find the S6I() call at the end of the file, or multiple fallback patterns
   let s6iCall = oldFile.indexOf('S6I();');
+  let fallbackUsed = false;
+
   if (s6iCall === -1) {
-    // Fallback: look for the last function call in the file
-    const endFuncPattern = /([a-zA-Z_$][a-zA-Z0-9_$]{0,10})\(\);?$/;
+    // Fallback 1: look for other known initialization function calls
+    const knownFuncs = ['S6I', 'initApp', 'initialize', 'setup'];
+    for (const func of knownFuncs) {
+      const idx = oldFile.indexOf(`${func}();`);
+      if (idx !== -1) {
+        s6iCall = idx;
+        console.log(`patch: writeDynamicModelFetcher: using known function ${func} at position`, s6iCall);
+        fallbackUsed = true;
+        break;
+      }
+    }
+  }
+
+  if (s6iCall === -1) {
+    // Fallback 2: look for the last function call in the file (more robust pattern)
+    const endFuncPattern = /([a-zA-Z_$][a-zA-Z0-9_$]{1,15})\(\);?\s*$/;
     const match = oldFile.match(endFuncPattern);
     if (match && match.index !== undefined) {
       s6iCall = match.index;
       console.log('patch: writeDynamicModelFetcher: using fallback function call at position', s6iCall);
-    } else {
-      console.error('patch: writeDynamicModelFetcher: failed to find S6I() call or fallback function call');
-      return null;
+      fallbackUsed = true;
     }
+  }
+
+  if (s6iCall === -1) {
+    // Fallback 3: look for return statement or end of main function
+    const returnPattern = /return\s+[^;]+;?\s*$/;
+    const returnMatch = oldFile.match(returnPattern);
+    if (returnMatch && returnMatch.index !== undefined) {
+      s6iCall = returnMatch.index;
+      console.log('patch: writeDynamicModelFetcher: using return statement fallback at position', s6iCall);
+      fallbackUsed = true;
+    }
+  }
+
+  if (s6iCall === -1) {
+    console.error('patch: writeDynamicModelFetcher: failed to find any suitable injection point');
+    return null;
   }
 
   const inject = `
@@ -110,35 +140,81 @@ if (!global.claude_models_hardcoded) {
 
 // 2) Add fallback logic to ht4() function or similar model getter function
 const writeHt4Fallback = (oldFile: string): string | null => {
-  // Find the ht4() function definition or fallback to similar function patterns
+  // Find the ht4() function definition or multiple fallback patterns
   let ht4Match = oldFile.match(/function ht4\(\)\s*\{/);
   let functionName = 'ht4';
 
   if (!ht4Match || ht4Match.index === undefined) {
-    // Fallback: look for function definitions that might be model getters
-    // Pattern: function [a-zA-Z0-9_$]{2,6}\(\)\s*\{ - short function names that take no args
-    const funcPattern = /function ([a-zA-Z_$][a-zA-Z0-9_$]{2,5})\(\)\s*\{/g;
-    const matches = Array.from(oldFile.matchAll(funcPattern));
-
-    // Look for functions that might return model arrays (heuristic: functions with array literals nearby)
-    for (const match of matches) {
-      const funcStart = match.index;
-      const funcEnd = funcStart + 500; // Check next 500 chars for array patterns
-      const chunk = oldFile.slice(funcStart, funcEnd);
-
-      // Look for array patterns that might contain model data
-      if (chunk.includes('["sonnet"') || chunk.includes('["opus"') || chunk.includes('["haiku"')) {
+    // Fallback 1: look for known model getter function names
+    const knownGetters = ['ht4', 'getModels', 'models', 'modelList', 'availableModels'];
+    for (const getter of knownGetters) {
+      const pattern = new RegExp(`function ${getter}\\(\\)\\s*\\{`);
+      const match = oldFile.match(pattern);
+      if (match && match.index !== undefined) {
         ht4Match = match;
-        functionName = match[1];
-        console.log(`patch: writeHt4Fallback: using fallback function ${functionName} instead of ht4`);
+        functionName = getter;
+        console.log(`patch: writeHt4Fallback: using known getter function ${functionName}`);
         break;
       }
     }
+  }
 
-    if (!ht4Match || ht4Match.index === undefined) {
-      console.error('patch: writeHt4Fallback: failed to find ht4() function or suitable fallback');
-      return null;
+  if (!ht4Match || ht4Match.index === undefined) {
+    // Fallback 2: look for function definitions that might be model getters (more flexible)
+    // Pattern: function [a-zA-Z0-9_$]{2,8}\(\)\s*\{ - short to medium function names that take no args
+    const funcPattern = /function ([a-zA-Z_$][a-zA-Z0-9_$]{2,7})\(\)\s*\{/g;
+    const matches = Array.from(oldFile.matchAll(funcPattern));
+
+    // Look for functions that might return model arrays (heuristic: functions with array literals or model-related strings nearby)
+    for (const match of matches) {
+      const funcStart = match.index;
+      const funcEnd = Math.min(funcStart + 800, oldFile.length); // Check next 800 chars for patterns
+      const chunk = oldFile.slice(funcStart, funcEnd);
+
+      // Look for array patterns that might contain model data or model-related keywords
+      const modelIndicators = [
+        '["sonnet"', '["opus"', '["haiku"', '["claude"',
+        '"gpt"', '"model"', 'models', 'Model',
+        'return [', 'return{', 'options:', 'value:', 'label:'
+      ];
+
+      if (modelIndicators.some(indicator => chunk.includes(indicator))) {
+        ht4Match = match;
+        functionName = match[1];
+        console.log(`patch: writeHt4Fallback: using pattern-matched function ${functionName} instead of ht4`);
+        break;
+      }
     }
+  }
+
+  if (!ht4Match || ht4Match.index === undefined) {
+    // Fallback 3: look for arrow functions or const function assignments that might be model getters
+    const arrowPattern = /(?:const|let|var)\s+([a-zA-Z_$][a-zA-Z0-9_$]{2,7})\s*=\s*(?:\([^)]*\)\s*=>|function\s*\([^)]*\)\s*\{)/g;
+    const matches = Array.from(oldFile.matchAll(arrowPattern));
+
+    for (const match of matches) {
+      const funcStart = match.index;
+      const funcEnd = Math.min(funcStart + 600, oldFile.length);
+      const chunk = oldFile.slice(funcStart, funcEnd);
+
+      const modelIndicators = [
+        '["sonnet"', '["opus"', '["haiku"', '"claude"',
+        '"model"', 'models', 'Model', 'return [', 'return{'
+      ];
+
+      if (modelIndicators.some(indicator => chunk.includes(indicator))) {
+        // Create a proper RegExpMatchArray
+        ht4Match = match as RegExpMatchArray;
+        functionName = match[1];
+        console.log(`patch: writeHt4Fallback: using arrow/const function ${functionName}`);
+        break;
+      }
+    }
+  }
+
+  if (!ht4Match || ht4Match.index === undefined) {
+    console.error('patch: writeHt4Fallback: failed to find ht4() function or any suitable fallback');
+    return null;
   }
 
   const functionStart = ht4Match.index;
@@ -159,7 +235,7 @@ const writeHt4Fallback = (oldFile: string): string | null => {
   return newFile;
 };
 
-// 3) Increase the visible model list limit from 10 to 15 (show all) - adaptive
+// 3) Increase the visible model list limit from 10 to 15 (show all) - adaptive with multiple fallbacks
 const writeVisibleLimitPatch = (oldFile: string): string | null => {
   // First, try to find and replace patterns with variable names that might be minified
   // Pattern: [A-Z]\s*=\s*10,\s*[A-Z]\s*=\s*Math\.min\(10,\s*\w+\.length\)
@@ -177,11 +253,46 @@ const writeVisibleLimitPatch = (oldFile: string): string | null => {
     return newFile;
   }
 
-  // Fallback: Just replace any F = 10 with F = 10 (keeping limit as 10 but ensuring we find it)
+  // Fallback 1: Look for Math.min(10, something.length) patterns
+  const minPattern = /Math\.min\(\s*10\s*,\s*([$\w]+)\.length\s*\)/;
+  const minMatch = oldFile.match(minPattern);
+  if (minMatch && minMatch.index !== undefined) {
+    const arrayVar = minMatch[1];
+    const updated = `Math.min(15, ${arrayVar}.length)`;
+    const newFile =
+      oldFile.slice(0, minMatch.index) +
+      updated +
+      oldFile.slice(minMatch.index + minMatch[0].length);
+    showDiff(oldFile, newFile, updated, minMatch.index, minMatch.index + updated.length);
+    return newFile;
+  }
+
+  // Fallback 2: Look for hardcoded 10 in context of model/list limiting
+  const contextPatterns = [
+    /visibleOptionCount\s*[:=]\s*10/,
+    /maxItems\s*[:=]\s*10/,
+    /limit\s*[:=]\s*10/,
+    /([$\w]+)\s*=\s*10.*(?:model|list|option)/i
+  ];
+
+  for (const pattern of contextPatterns) {
+    const match = oldFile.match(pattern);
+    if (match && match.index !== undefined) {
+      const updated = match[0].replace('10', '15');
+      const newFile =
+        oldFile.slice(0, match.index) +
+        updated +
+        oldFile.slice(match.index + match[0].length);
+      showDiff(oldFile, newFile, updated, match.index, match.index + updated.length);
+      return newFile;
+    }
+  }
+
+  // Fallback 3: Just replace any F = 10 with F = 10 (keeping limit as 10 but ensuring we find it)
   const fLineMatch = oldFile.match(/([A-Z])\s*=\s*10,/);
   if (!fLineMatch || fLineMatch.index === undefined) {
-    console.error('patch: writeVisibleLimitPatch: failed to find variable = 10 pattern');
-    return null;
+    console.log('patch: writeVisibleLimitPatch: no suitable limit pattern found, skipping...');
+    return oldFile; // Return original file instead of null to not break the patch chain
   }
 
   const varName = fLineMatch[1];
@@ -390,11 +501,11 @@ export const writeModelCustomizations = (oldFile: string): string | null => {
 
   // 3) Keep visible model list limit at 10 (adaptive)
   const e = writeVisibleLimitPatch(updated);
-  if (e) {
+  if (e && e !== updated) {
     updated = e;
     hasChanges = true;
   } else {
-    console.log('patch: modelSelector: writeVisibleLimitPatch failed, continuing...');
+    console.log('patch: modelSelector: writeVisibleLimitPatch failed or no changes, continuing...');
   }
 
   return hasChanges ? updated : null;

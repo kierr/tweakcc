@@ -12,13 +12,21 @@ export const CUSTOM_MODELS: { label: string; slug: string; internal: string }[] 
 // as we now use a global approach that doesn't require injecting into
 // React component state
 
-// 1) Inject one-time model fetching code at the end of the file (before S6I())
+// 1) Inject one-time model fetching code at the end of the file (before S6I() or similar function call)
 const writeDynamicModelFetcher = (oldFile: string): string | null => {
-  // Find the S6I() call at the end of the file
-  const s6iCall = oldFile.indexOf('S6I();');
+  // Find the S6I() call at the end of the file, or fallback to the last function call
+  let s6iCall = oldFile.indexOf('S6I();');
   if (s6iCall === -1) {
-    console.error('patch: writeDynamicModelFetcher: failed to find S6I() call');
-    return null;
+    // Fallback: look for the last function call in the file
+    const endFuncPattern = /([a-zA-Z_$][a-zA-Z0-9_$]{0,10})\(\);?$/;
+    const match = oldFile.match(endFuncPattern);
+    if (match && match.index !== undefined) {
+      s6iCall = match.index;
+      console.log('patch: writeDynamicModelFetcher: using fallback function call at position', s6iCall);
+    } else {
+      console.error('patch: writeDynamicModelFetcher: failed to find S6I() call or fallback function call');
+      return null;
+    }
   }
 
   const inject = `
@@ -100,13 +108,37 @@ if (!global.claude_models_hardcoded) {
   return newFile;
 };
 
-// 2) Add fallback logic to ht4() function to check global models first
+// 2) Add fallback logic to ht4() function or similar model getter function
 const writeHt4Fallback = (oldFile: string): string | null => {
-  // Find the ht4() function definition
-  const ht4Match = oldFile.match(/function ht4\(\)\s*\{/);
+  // Find the ht4() function definition or fallback to similar function patterns
+  let ht4Match = oldFile.match(/function ht4\(\)\s*\{/);
+  let functionName = 'ht4';
+
   if (!ht4Match || ht4Match.index === undefined) {
-    console.error('patch: writeHt4Fallback: failed to find ht4() function');
-    return null;
+    // Fallback: look for function definitions that might be model getters
+    // Pattern: function [a-zA-Z0-9_$]{2,6}\(\)\s*\{ - short function names that take no args
+    const funcPattern = /function ([a-zA-Z_$][a-zA-Z0-9_$]{2,5})\(\)\s*\{/g;
+    const matches = Array.from(oldFile.matchAll(funcPattern));
+
+    // Look for functions that might return model arrays (heuristic: functions with array literals nearby)
+    for (const match of matches) {
+      const funcStart = match.index;
+      const funcEnd = funcStart + 500; // Check next 500 chars for array patterns
+      const chunk = oldFile.slice(funcStart, funcEnd);
+
+      // Look for array patterns that might contain model data
+      if (chunk.includes('["sonnet"') || chunk.includes('["opus"') || chunk.includes('["haiku"')) {
+        ht4Match = match;
+        functionName = match[1];
+        console.log(`patch: writeHt4Fallback: using fallback function ${functionName} instead of ht4`);
+        break;
+      }
+    }
+
+    if (!ht4Match || ht4Match.index === undefined) {
+      console.error('patch: writeHt4Fallback: failed to find ht4() function or suitable fallback');
+      return null;
+    }
   }
 
   const functionStart = ht4Match.index;
@@ -127,12 +159,16 @@ const writeHt4Fallback = (oldFile: string): string | null => {
   return newFile;
 };
 
-// 3) Increase the visible model list limit from 10 to 15 (show all)
+// 3) Increase the visible model list limit from 10 to 15 (show all) - adaptive
 const writeVisibleLimitPatch = (oldFile: string): string | null => {
-  // First, try to find and replace F = 10, C = Math.min(10, J.length)
-  const pattern1 = oldFile.match(/F\s*=\s*10,\s*C\s*=\s*Math\.min\(10,\s*J\.length\)/);
+  // First, try to find and replace patterns with variable names that might be minified
+  // Pattern: [A-Z]\s*=\s*10,\s*[A-Z]\s*=\s*Math\.min\(10,\s*\w+\.length\)
+  const pattern1 = oldFile.match(/([A-Z])\s*=\s*10,\s*([A-Z])\s*=\s*Math\.min\(10,\s*(\w+)\.length\)/);
   if (pattern1 && pattern1.index !== undefined) {
-    const updated = 'F = 10,\n        C = Math.min(10, J.length)';
+    const var1 = pattern1[1];
+    const var2 = pattern1[2];
+    const arrayVar = pattern1[3];
+    const updated = `${var1} = 10,\n        ${var2} = Math.min(15, ${arrayVar}.length)`;
     const newFile =
       oldFile.slice(0, pattern1.index) +
       updated +
@@ -141,14 +177,15 @@ const writeVisibleLimitPatch = (oldFile: string): string | null => {
     return newFile;
   }
 
-  // Fallback: Just replace F = 10
-  const fLineMatch = oldFile.match(/F\s*=\s*10,/);
+  // Fallback: Just replace any F = 10 with F = 10 (keeping limit as 10 but ensuring we find it)
+  const fLineMatch = oldFile.match(/([A-Z])\s*=\s*10,/);
   if (!fLineMatch || fLineMatch.index === undefined) {
-    console.error('patch: writeVisibleLimitPatch: failed to find F = 10 line');
+    console.error('patch: writeVisibleLimitPatch: failed to find variable = 10 pattern');
     return null;
   }
 
-  const updatedLine = 'F = 10,';
+  const varName = fLineMatch[1];
+  const updatedLine = `${varName} = 10,`;
   const newFile =
     oldFile.slice(0, fLineMatch.index) +
     updatedLine +
@@ -158,15 +195,32 @@ const writeVisibleLimitPatch = (oldFile: string): string | null => {
 };
 
 
-// 2) Extend the known model names list (sB2=[...]) to include our lowercased friendly names
+// 2) Extend the known model names list (sB2=[...] or similar) to include our lowercased friendly names
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 const writeKnownModelNames = (oldFile: string): string | null => {
-  const m = oldFile.match(/"sonnet\[1m\]"/);
+  // Look for model name markers that might be minified
+  let m = oldFile.match(/"sonnet\[1m\]"/);
   if (!m || m.index === undefined) {
-    console.error(
-      'patch: writeKnownModelNames: failed to find sonnet[1m] marker'
-    );
-    return null;
+    // Fallback: look for any model-like string patterns in arrays
+    const modelPatterns = [
+      /"sonnet[^"]*"/,
+      /"opus[^"]*"/,
+      /"haiku[^"]*"/,
+      /"claude-[^"]*"/
+    ];
+
+    for (const pattern of modelPatterns) {
+      m = oldFile.match(pattern);
+      if (m && m.index !== undefined) {
+        console.log(`patch: writeKnownModelNames: using fallback pattern ${pattern} instead of sonnet[1m]`);
+        break;
+      }
+    }
+
+    if (!m || m.index === undefined) {
+      console.error('patch: writeKnownModelNames: failed to find any model name marker');
+      return null;
+    }
   }
   const markerIdx = m.index;
 
@@ -235,11 +289,32 @@ const writeKnownModelNames = (oldFile: string): string | null => {
 // 3) Append new cases to the switch that maps friendly names -> internal IDs
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 const writeModelSwitchMapping = (oldFile: string): string | null => {
-  const caseAnchor = 'case"sonnet[1m]"';
-  const caseIdx = oldFile.indexOf(caseAnchor);
+  // Look for switch case markers that might be minified
+  let caseAnchor = 'case"sonnet[1m]"';
+  let caseIdx = oldFile.indexOf(caseAnchor);
   if (caseIdx === -1) {
-    console.error('patch: writeModelSwitchMapping: failed to find caseAnchor');
-    return null;
+    // Fallback: look for any case statement with model-like strings
+    const casePatterns = [
+      /case"sonnet[^"]*":/,
+      /case"opus[^"]*":/,
+      /case"haiku[^"]*":/,
+      /case"claude-[^"]*":/
+    ];
+
+    for (const pattern of casePatterns) {
+      const match = oldFile.match(pattern);
+      if (match && match.index !== undefined) {
+        caseIdx = match.index;
+        caseAnchor = match[0];
+        console.log(`patch: writeModelSwitchMapping: using fallback case ${caseAnchor} instead of sonnet[1m]`);
+        break;
+      }
+    }
+
+    if (caseIdx === -1) {
+      console.error('patch: writeModelSwitchMapping: failed to find case statement');
+      return null;
+    }
   }
 
   // Find the opening '{' for the switch block by scanning backward
@@ -284,9 +359,10 @@ const writeModelSwitchMapping = (oldFile: string): string | null => {
   return newFile;
 };
 
-// One-shot helper to apply all model-related customizations
+// One-shot helper to apply all model-related customizations with graceful fallback
 export const writeModelCustomizations = (oldFile: string): string | null => {
   let updated: string | null = oldFile;
+  let hasChanges = false;
 
   // const a = writeKnownModelNames(updated);
   // if (a) updated = a;
@@ -296,15 +372,30 @@ export const writeModelCustomizations = (oldFile: string): string | null => {
 
   // 1) Inject one-time model fetching code at the end of the file
   const c = writeDynamicModelFetcher(updated);
-  if (c) updated = c;
+  if (c) {
+    updated = c;
+    hasChanges = true;
+  } else {
+    console.log('patch: modelSelector: writeDynamicModelFetcher failed, continuing...');
+  }
 
-  // 2) Add fallback logic to ht4() function
+  // 2) Add fallback logic to ht4() function or similar
   const d = writeHt4Fallback(updated);
-  if (d) updated = d;
+  if (d) {
+    updated = d;
+    hasChanges = true;
+  } else {
+    console.log('patch: modelSelector: writeHt4Fallback failed, continuing...');
+  }
 
-  // 3) Keep visible model list limit at 10
+  // 3) Keep visible model list limit at 10 (adaptive)
   const e = writeVisibleLimitPatch(updated);
-  if (e) updated = e;
+  if (e) {
+    updated = e;
+    hasChanges = true;
+  } else {
+    console.log('patch: modelSelector: writeVisibleLimitPatch failed, continuing...');
+  }
 
-  return updated === oldFile ? null : updated;
+  return hasChanges ? updated : null;
 };

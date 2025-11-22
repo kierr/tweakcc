@@ -338,3 +338,54 @@ export async function replaceFileBreakingHardLinks(
     );
   }
 }
+
+/**
+ * Checks if we have sufficient permissions to perform restore operations.
+ * @param filePaths Array of file paths to check
+ * @returns Promise<boolean> true if all checks pass, false otherwise
+ */
+export async function checkRestorePermissions(filePaths: string[]): Promise<boolean> {
+  try {
+    for (const filePath of filePaths) {
+      // Check if file exists
+      try {
+        await fsPromises.access(filePath, fs.constants.F_OK);
+      } catch {
+        console.error(`File does not exist: ${filePath}`);
+        return false;
+      }
+
+      // Check write permissions
+      try {
+        await fsPromises.access(filePath, fs.constants.W_OK);
+      } catch {
+        console.error(`No write permission for file: ${filePath}`);
+        return false;
+      }
+
+      // Check if we can read the file (for backup verification)
+      try {
+        await fsPromises.access(filePath, fs.constants.R_OK);
+      } catch {
+        console.error(`No read permission for file: ${filePath}`);
+        return false;
+      }
+    }
+
+    // Check available disk space (rough estimate)
+    try {
+      // Note: Node.js doesn't have a built-in way to check free disk space across all platforms
+      // This would typically require platform-specific code or external libraries
+      if (isDebug()) {
+        console.log(`Permission checks passed for all files`);
+      }
+      return true;
+    } catch (error) {
+      console.error(`Failed to check file stats for space estimation: ${error}`);
+      return false;
+    }
+  } catch (error) {
+    console.error(`Permission check failed: ${error}`);
+    return false;
+  }
+}

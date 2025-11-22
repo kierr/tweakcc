@@ -159,6 +159,73 @@ export enum MainMenuItem {
 export const DEFAULT_SETTINGS: Settings = {
   themes: [
     {
+      name: 'Auto (System)',
+      id: 'auto',
+      colors: {
+        autoAccept: 'rgb(175,135,255)',
+        bashBorder: 'rgb(253,93,177)',
+        claude: 'rgb(215,119,87)',
+        claudeShimmer: 'rgb(235,159,127)',
+        claudeBlue_FOR_SYSTEM_SPINNER: 'rgb(147,165,255)',
+        claudeBlueShimmer_FOR_SYSTEM_SPINNER: 'rgb(177,195,255)',
+        permission: 'rgb(177,185,249)',
+        permissionShimmer: 'rgb(207,215,255)',
+        planMode: 'rgb(72,150,140)',
+        ide: 'rgb(71,130,200)',
+        promptBorder: 'rgb(136,136,136)',
+        promptBorderShimmer: 'rgb(166,166,166)',
+        text: 'rgb(255,255,255)',
+        inverseText: 'rgb(0,0,0)',
+        inactive: 'rgb(153,153,153)',
+        subtle: 'rgb(80,80,80)',
+        suggestion: 'rgb(177,185,249)',
+        remember: 'rgb(177,185,249)',
+        background: 'rgb(0,204,204)',
+        success: 'rgb(78,186,101)',
+        error: 'rgb(255,107,128)',
+        warning: 'rgb(255,193,7)',
+        warningShimmer: 'rgb(255,223,57)',
+        diffAdded: 'rgb(34,92,43)',
+        diffRemoved: 'rgb(122,41,54)',
+        diffAddedDimmed: 'rgb(71,88,74)',
+        diffRemovedDimmed: 'rgb(105,72,77)',
+        diffAddedWord: 'rgb(56,166,96)',
+        diffRemovedWord: 'rgb(179,89,107)',
+        diffAddedWordDimmed: 'rgb(46,107,58)',
+        diffRemovedWordDimmed: 'rgb(139,57,69)',
+        red_FOR_SUBAGENTS_ONLY: 'rgb(220,38,38)',
+        blue_FOR_SUBAGENTS_ONLY: 'rgb(37,99,235)',
+        green_FOR_SUBAGENTS_ONLY: 'rgb(22,163,74)',
+        yellow_FOR_SUBAGENTS_ONLY: 'rgb(202,138,4)',
+        purple_FOR_SUBAGENTS_ONLY: 'rgb(147,51,234)',
+        orange_FOR_SUBAGENTS_ONLY: 'rgb(234,88,12)',
+        pink_FOR_SUBAGENTS_ONLY: 'rgb(219,39,119)',
+        cyan_FOR_SUBAGENTS_ONLY: 'rgb(8,145,178)',
+        professionalBlue: 'rgb(106,155,204)',
+        rainbow_red: 'rgb(235,95,87)',
+        rainbow_orange: 'rgb(245,139,87)',
+        rainbow_yellow: 'rgb(250,195,95)',
+        rainbow_green: 'rgb(145,200,130)',
+        rainbow_blue: 'rgb(130,170,220)',
+        rainbow_indigo: 'rgb(155,130,200)',
+        rainbow_violet: 'rgb(200,130,180)',
+        rainbow_red_shimmer: 'rgb(250,155,147)',
+        rainbow_orange_shimmer: 'rgb(255,185,137)',
+        rainbow_yellow_shimmer: 'rgb(255,225,155)',
+        rainbow_green_shimmer: 'rgb(185,230,180)',
+        rainbow_blue_shimmer: 'rgb(180,205,240)',
+        rainbow_indigo_shimmer: 'rgb(195,180,230)',
+        rainbow_violet_shimmer: 'rgb(230,180,210)',
+        clawd_body: 'rgb(215,119,87)',
+        clawd_background: 'rgb(0,0,0)',
+        userMessageBackground: 'rgb(55, 55, 55)',
+        bashMessageBackgroundColor: 'rgb(65, 60, 65)',
+        memoryBackgroundColor: 'rgb(55, 65, 70)',
+        rate_limit_fill: 'rgb(177,185,249)',
+        rate_limit_empty: 'rgb(80,83,112)',
+      },
+    },
+    {
       name: 'Dark mode',
       id: 'dark',
       colors: {
@@ -993,12 +1060,12 @@ const getClijsSearchPathsWithInfo = (): SearchPathInfo[] => {
   // Platform-specific paths.
   // prettier-ignore
   if (process.platform == "win32") {
-    // volta, npm, yarn, pnpm
+    // volta, npm, yarn, bun
     addPath(`${home}/AppData/Local/Volta/tools/image/packages/@anthropic-ai/claude-code/${mod}`);
     addPath(`${home}/AppData/Roaming/npm/${mod}`);
     addPath(`${home}/AppData/Roaming/nvm/*/${mod}`, true);
     addPath(`${home}/AppData/Local/Yarn/config/global/${mod}`);
-    addPath(`${home}/AppData/Local/pnpm/global/*/${mod}`, true);
+    addPath(`${home}/AppData/Local/bun/global/*/${mod}`, true);
 
     // nvm4w (https://github.com/coreybutler/nvm-windows) (#118)
     addPath(`C:/nvm4w/nodejs/${mod}`);
@@ -1054,13 +1121,13 @@ const getClijsSearchPathsWithInfo = (): SearchPathInfo[] => {
     addPath(`${home}/.yarn/global/${mod}`);
     addPath(`${home}/.bun/install/global/${mod}`);
 
-    // pnpm
-    addPath(`${home}/.pnpm-global/${mod}`);
-    addPath(`${home}/.pnpm-global/*/${mod}`, true);
-    addPath(`${home}/pnpm-global/${mod}`);
-    addPath(`${home}/pnpm-global/*/${mod}`, true);
-    addPath(`${home}/.local/share/pnpm/global/${mod}`);
-    addPath(`${home}/.local/share/pnpm/global/*/${mod}`, true);
+    // Bun
+    addPath(`${home}/.bun-install/global/${mod}`);
+    addPath(`${home}/.bun-install/global/*/${mod}`, true);
+    addPath(`${home}/bun-global/${mod}`);
+    addPath(`${home}/bun-global/*/${mod}`, true);
+    addPath(`${home}/.local/share/bun/global/${mod}`);
+    addPath(`${home}/.local/share/bun/global/*/${mod}`, true);
 
     // Bun
     addPath(`${home}/.bun/install/global/${mod}`);

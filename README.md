@@ -7,7 +7,7 @@
 tweakcc is a CLI tool that upgrades your Claude Code experience.  Customize its system prompts, add custom themes, create toolsets, and personalize the UI.
 
 > [!important]
-> **NEW in 3.1.0:** tweakcc now enables you to manually name your Claude Code sessions&mdash;run `npx tweakc --apply` now to get a `/title my chat title` slash command (or `/rename`)!
+> **NEW in 3.1.0:** tweakcc now enables you to manually name your Claude Code sessions&mdash;run `bunx tweakcc --apply` now to get a `/title my chat title` slash command (or `/rename`)!
 
 > [!tip]
 > **NEW in 3.0.0:** tweakcc now supports Claude Code native installations!  It also adds a new feature to CC called **toolsets**&mdash;try them out in Claude Code with the `/toolsets` command after you create them in tweakcc.  Lastly it makes [Claude Code's native LSP server support work.](https://www.reddit.com/r/ClaudeAI/comments/1otdfo9/lsp_is_coming_to_claude_code_and_you_can_try_it/)
@@ -15,7 +15,7 @@ tweakcc is a CLI tool that upgrades your Claude Code experience.  Customize its 
 > [!note]
 > ⭐ **If you find tweakcc useful, please consider [starring the repository](https://github.com/Piebald-AI/tweakcc) to show your support!** ⭐
 
-<img src="./assets/demo.gif" alt="Animated GIF demonstrating running `npx tweakcc`, creating a new theme, changing all of Claude Code's UI colors to purple, changing the thinking format from '<verb>ing...' to 'Claude is <verb>ing', changing the generating spinner style to a 50m glow animation, applying the changes, running Claude, and using '/config' to switch to the new theme, and sending a message to see the new thinking verb format." width="800">
+<img src="./assets/demo.gif" alt="Animated GIF demonstrating running `bunx tweakcc`, creating a new theme, changing all of Claude Code's UI colors to purple, changing the thinking format from '<verb>ing...' to 'Claude is <verb>ing', changing the generating spinner style to a 50m glow animation, applying the changes, running Claude, and using '/config' to switch to the new theme, and sending a message to see the new thinking verb format." width="800">
 
 With tweakcc, you can
 
@@ -38,20 +38,17 @@ Additionally, we're working on features that will allow you to
 - Pick from over **70+ spinning/thinking animations** from [`cli-spinners`](https://github.com/sindresorhus/cli-spinners)
 - Apply **custom styling** to the markdown elements in Claude's responses like code, bold, headers, etc
 
-tweakcc supports Claude Code installed on **Windows, macOS, and Linux**, both **native/binary installations** and those installed via npm, yarn, pnpm, bun, Homebrew/Linuxbrew, nvm, fnm, n, volta, nvs, and nodenv, as well as custom locations.
+tweakcc supports Claude Code installed on **Windows, macOS, and Linux**, both **native/binary installations** and those installed via npm, yarn, bun, Homebrew/Linuxbrew, nvm, fnm, n, volta, nvs, and nodenv, as well as custom locations.
 
 Run without installation:
 
 ```bash
-$ npx tweakcc
-
-# Or use pnpm:
-$ pnpm dlx tweakcc
+$ bunx tweakcc
 ```
 
 ## How it works
 
-tweakcc works by patching Claude Code's minified `cli.js` file.  For npm-based installations this file is modified directly, but for native installation it's extracted from the binary, patched, and then the binary is repacked.  When you update your Claude Code installation, your customizations will be overwritten, but they're remembered in your configuration file, so they can be reapplied by just running `npx tweakcc --apply`.
+tweakcc works by patching Claude Code's minified `cli.js` file.  For bun-based installations this file is modified directly, but for native installation it's extracted from the binary, patched, and then the binary is repacked.  When you update your Claude Code installation, your customizations will be overwritten, but they're remembered in your configuration file, so they can be reapplied by just running `bunx tweakcc --apply`.
 
 tweakcc is verified to work with Claude Code **2.0.36**.
 
@@ -64,15 +61,43 @@ tweakcc stores its configuration files in one of the following locations, in ord
 
 ## Building from source
 
-You can use tweakcc by running `npx tweakcc`, or `npm install -g tweakcc` and then `tweakcc`.  Or build and run it locally:
+You can use tweakcc by running `bunx tweakcc`, or `bun install -g tweakcc` and then `tweakcc`.  Or build and run it locally:
 
 ```bash
 git clone https://github.com/Piebald-AI/tweakcc.git
 cd tweakcc
-pnpm i
-pnpm build
+bun install
+bun build
 node dist/index.js
 ```
+
+## CLI Options
+
+tweakcc supports several command-line options:
+
+- **`bunx tweakcc`** - Launch interactive UI (default)
+- **`bunx tweakcc --apply`** - Apply saved customizations without interactive UI
+- **`bunx tweakcc --backup`** - Create a backup of the current Claude Code installation
+- **`bunx tweakcc --restore`** - Restore Claude Code from backup to original state
+- **`bunx tweakcc --debug`** - Enable debug mode for troubleshooting
+
+
+### Backup & Restore
+
+The `--backup` and `--restore` commands provide scripting support for backup operations:
+
+```bash
+# Create a backup before applying customizations
+bunx tweakcc --backup
+
+# Apply your customizations
+bunx tweakcc --apply
+
+# If something goes wrong, restore from backup
+bunx tweakcc --restore
+```
+
+These commands work automatically with both npm installations and native/binary installations of Claude Code.
 
 ## Related projects
 
@@ -105,7 +130,7 @@ tweakcc's method for modifying involves maintaining one markdown file for each i
 
 When tweakcc starts up, it downloads a list of system prompt parts for your Claude Code installation from GitHub (the [`data/prompts`](https://github.com/Piebald-AI/tweakcc/tree/main/data/prompts) folder in the tweakcc repo).  It then checks if each prompt part has a corresponding markdown file on disk, creating ones that don't exist and populating them with the default text for the version.
 
-Simply edit the markdown files in `~/.tweakcc/system-prompts` (or `$XDG_CONFIG_HOME/tweakcc/system-prompts`) and then run `npx tweakcc --apply`.
+Simply edit the markdown files in `~/.tweakcc/system-prompts` (or `$XDG_CONFIG_HOME/tweakcc/system-prompts`) and then run `bunx tweakcc --apply`.
 
 #### What happens when Anthropic changes the prompts?
 
@@ -126,11 +151,60 @@ This is a great idea, and we recommend it; in fact, we have one ourselves [here.
 
 ## Troubleshooting
 
+### Backup & Restore Issues
+
 tweakcc stores a backup of your Claude Code `cli.js`/binary for when you want to revert your customizations and for reapplying patches.  Before it applies your customizations, it restores the original `cli.js`/binary so that it can start from a clean slate.  Sometimes things can get confused and your `claude` can be corrupted.
 
-In particular, you may run into a situation where you have a tweakcc-patched (or maybe a formatted) `claude` but no tweakcc backup.  And then it makes a backup of that modified `claude`.  If you then try to reinstall Claude Code and apply your customizations, tweakcc will restore its backup of the old _modified_ `claude`.
+#### Common Issues
 
-To break out of this loop you can install a different version of Claude Code, which will cause tweakcc to discard its existing backup and take a fresh backup of the new `claude` file.  Or you can simply delete tweakcc's backup file (located at `~/.tweakcc/cli.backup.js` or `~/.tweakcc/native-binary.backup`).  If you do delete `cli.backup.js` or `native-binary.backup`, make sure you reinstall Claude Code _before_ you run tweakcc again, because if your `claude` is still the modified version, it will get into the same loop again.
+**Issue:** You may run into a situation where you have a tweakcc-patched (or maybe a formatted) `claude` but no tweakcc backup.  And then it makes a backup of that modified `claude`.  If you then try to reinstall Claude Code and apply your customizations, tweakcc will restore its backup of the old _modified_ `claude`.
+
+**Solution:** To break out of this loop you can install a different version of Claude Code, which will cause tweakcc to discard its existing backup and take a fresh backup of the new `claude` file.  Or you can simply delete tweakcc's backup file (located at `~/.tweakcc/cli.backup.js` or `~/.tweakcc/native-binary.backup`).  If you do delete `cli.backup.js` or `native-binary.backup`, make sure you reinstall Claude Code _before_ you run tweakcc again, because if your `claude` is still the modified version, it will get into the same loop again.
+
+**Issue:** Permission errors during backup/restore operations
+
+**Solution:** Ensure you have write permissions to:
+- Your Claude Code installation directory
+- Your tweakcc configuration directory (`~/.tweakcc/` or `$XDG_CONFIG_HOME/tweakcc`)
+- The backup files themselves
+
+You can use `chmod` to fix permissions if needed, or run with appropriate privileges.
+
+**Issue:** Backup/restore operations fail silently
+
+**Solution:** Use the `--debug` flag to see detailed error messages:
+```bash
+bunx tweakcc --backup --debug
+bunx tweakcc --restore --debug
+```
+
+#### Manual Recovery
+
+If automated restore isn't working, you can manually restore by:
+
+1. **For bun installations:**
+   ```bash
+   # Restore from backup manually
+   cp ~/.tweakcc/cli.js.backup.js "$(bunx which claude)"
+   ```
+
+2. **For native installations:**
+   You'll need to reinstall Claude Code since native binaries are more complex to restore manually.
+
+#### CLI Commands for Troubleshooting
+
+Use the new CLI flags for backup/restore operations:
+
+```bash
+# Create fresh backup
+bunx tweakcc --backup
+
+# Restore to original state
+bunx tweakcc --restore
+
+# Check for errors with debug mode
+bunx tweakcc --restore --debug
+```
 
 ## FAQ
 
@@ -139,7 +213,7 @@ To break out of this loop you can install a different version of Claude Code, wh
 <details>
 <summary>How can I customize my Claude Code system prompts?</summary>
 
-Run `npx tweakcc` first, and then navigate to the `system-prompts` directory in your config directory (see [Configuration directory](#configuration-directory)), which will have just been created, in your file browser.  Each markdown file contains parts of prompts, such as the main system prompt, built-in tool descriptions, and various agent and utility prompts.  Modify any of them, and then run `tweakcc --apply` or the tweakcc UI to apply your changes.
+Run `bunx tweakcc` first, and then navigate to the `system-prompts` directory in your config directory (see [Configuration directory](#configuration-directory)), which will have just been created, in your file browser.  Each markdown file contains parts of prompts, such as the main system prompt, built-in tool descriptions, and various agent and utility prompts.  Modify any of them, and then run `bunx tweakcc --apply` or the tweakcc UI to apply your changes.
 
 </details>
 
@@ -156,7 +230,7 @@ No, it fetches them fresh from the [data/prompts](https://github.com/Piebald-AI/
 <details>
 <summary>How can I customize my Claude Code theme?</summary>
 
-Run `npx tweakcc`, go to `Themes`, and modify existing themes or create a new one.  Then go back to the main menu and choose `Apply customizations`.
+Run `bunx tweakcc`, go to `Themes`, and modify existing themes or create a new one.  Then go back to the main menu and choose `Apply customizations`.
 
 </details>
 

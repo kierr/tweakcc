@@ -144,7 +144,7 @@ export const getAppStateVarAndGetterFunction = (
 };
 
 /**
- * Get the location and identifiers for the tool fetching useMemo
+ * Get the location and identifiers for the tool fetching useMemo (adaptive with fallbacks)
  */
 export const getToolFetchingUseMemoLocation = (
   fileContents: string
@@ -167,16 +167,63 @@ export const getToolFetchingUseMemoLocation = (
   // Look at the next 300 chars
   const chunk = fileContents.slice(bodyStart, bodyStart + 300);
 
-  // Pattern to match: let outputVar=reactVar.useMemo(()=>filterFunc(contextVar),[contextVar])
-  const useMemoPattern =
-    /let ([$\w]+)=([$\w]+)\.useMemo\(\(\)=>([$\w]+)\(([$\w]+)\),\[\4\]\)/;
-  const match = chunk.match(useMemoPattern);
+  // Primary pattern: exact match for let outputVar=reactVar.useMemo(()=>filterFunc(contextVar),[contextVar])
+  let useMemoPattern = /let ([$\w]+)=([$\w]+)\.useMemo\(\(\)=>([$\w]+)\(([$\w]+)\),\[\4\]\)/;
+  let match = chunk.match(useMemoPattern);
 
   if (!match || match.index === undefined) {
-    console.error(
-      'patch: getToolFetchingUseMemoLocation: failed to find useMemoPattern'
-    );
-    return null;
+    // Fallback 1: more flexible useMemo pattern with tools in dependency array
+    useMemoPattern = /useMemo\([^)]*,\s*\[.*tools.*\]\)/;
+    match = chunk.match(useMemoPattern);
+
+    if (!match || match.index === undefined) {
+      // Fallback 2: look for useMemo with any dependency array containing tools
+      const toolsPattern = /let ([$\w]+)=([$\w]+)\.useMemo\([^,]+,.*\[.*tools.*\]\)/;
+      match = chunk.match(toolsPattern);
+
+      if (!match || match.index === undefined) {
+        // Fallback 3: structural search - find useMemo calls and check context
+        const useMemoCalls = Array.from(chunk.matchAll(/useMemo/g));
+        for (const call of useMemoCalls) {
+          if (call.index !== undefined) {
+            const callStart = call.index;
+            const callEnd = chunk.indexOf(')', callStart);
+            if (callEnd !== -1) {
+              const callContent = chunk.slice(callStart, callEnd + 1);
+              // Check if this useMemo contains tool-related patterns
+              if (callContent.includes('tools') || callContent.includes('filter') || callContent.includes('permission')) {
+                // Try to extract variables from surrounding context
+                const beforeCall = chunk.slice(Math.max(0, callStart - 50), callStart);
+                const letMatch = beforeCall.match(/let ([$\w]+)=([$\w]+)\.useMemo/);
+                if (letMatch) {
+                  // Create a synthetic match object
+                  const funcMatch = callContent.match(/\(\)=>([$\w]+)\(/);
+                  const contextMatch = callContent.match(/\(([$\w]+)\)/);
+                  if (funcMatch && contextMatch) {
+                    match = {
+                      0: letMatch[0] + callContent,
+                      1: letMatch[1], // outputVarName
+                      2: letMatch[2], // reactVarName
+                      3: funcMatch[1], // toolFilterFunction
+                      4: contextMatch[1], // toolPermissionContextVar
+                      index: call.index - (letMatch[0].length - letMatch[0].indexOf('useMemo')),
+                    } as any;
+                  }
+                  break;
+                }
+              }
+            }
+          }
+        }
+
+        if (!match || match.index === undefined) {
+          console.log(
+            'patch: getToolFetchingUseMemoLocation: could not find tool fetching useMemo with any pattern, skipping...'
+          );
+          return null;
+        }
+      }
+    }
   }
 
   const absoluteStart = bodyStart + match.index;

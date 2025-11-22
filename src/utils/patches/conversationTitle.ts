@@ -48,22 +48,63 @@ export const writeTitleSlashCommand = (oldFile: string): string | null => {
 // ============================================================================
 
 /**
- * Sub-patch 2a: Find location to insert custom naming functions
+ * Sub-patch 2a: Find location to insert custom naming functions (adaptive with fallbacks)
  * Searches for the class definition with summaries, messages, checkpoints, fileHistorySnapshots
  */
 export const findCustomNamingFunctionsLocation = (
   fileContents: string
 ): number | null => {
-  // Match: class [$\w]+{summaries;(?:customTitles;)?messages;checkpoints;fileHistorySnapshots;
-  const classPattern =
-    /class ([$\w]+)\{summaries;(?:customTitles;)?messages;checkpoints;fileHistorySnapshots;/;
-  const match = fileContents.match(classPattern);
+  // Primary pattern: exact match for class with all fields
+  let classPattern = /class ([$\w]+)\{summaries;(?:customTitles;)?messages;checkpoints;fileHistorySnapshots;/;
+  let match = fileContents.match(classPattern);
 
   if (!match || match.index === undefined) {
-    console.error(
-      'patch: conversationTitle: findCustomNamingFunctionsLocation: failed to find class pattern'
-    );
-    return null;
+    // Fallback 1: class with flexible field order
+    classPattern = /class ([$\w]+)\{[^}]*summaries[^}]*messages[^}]*checkpoints[^}]*fileHistorySnapshots[^}]*\}/;
+    match = fileContents.match(classPattern);
+
+    if (!match || match.index === undefined) {
+      // Fallback 2: look for class containing conversation-related fields
+      const conversationFields = ['summaries', 'messages', 'checkpoints', 'fileHistorySnapshots'];
+      const classMatches = Array.from(fileContents.matchAll(/class ([$\w]+)\{[^}]*\}/g));
+
+      for (const classMatch of classMatches) {
+        if (classMatch.index !== undefined) {
+          const classContent = classMatch[0];
+          const hasAllFields = conversationFields.every(field => classContent.includes(field));
+          if (hasAllFields) {
+            match = classMatch;
+            break;
+          }
+        }
+      }
+
+      if (!match || match.index === undefined) {
+        // Fallback 3: structural search - find any class with conversation/session related naming
+        const sessionPatterns = ['Conversation', 'Session', 'Chat', 'Message'];
+        for (const pattern of sessionPatterns) {
+          const patternRegex = new RegExp(`class ([$\w]*${pattern}[$\w]*)\\{`, 'i');
+          match = fileContents.match(patternRegex);
+          if (match && match.index !== undefined) {
+            // Verify it has some conversation fields
+            const classEnd = fileContents.indexOf('}', match.index);
+            if (classEnd !== -1) {
+              const classBody = fileContents.slice(match.index, classEnd);
+              if (classBody.includes('messages') || classBody.includes('summaries')) {
+                break;
+              }
+            }
+          }
+        }
+
+        if (!match || match.index === undefined) {
+          console.log(
+            'patch: conversationTitle: findCustomNamingFunctionsLocation: could not find conversation class with any pattern, skipping...'
+          );
+          return null;
+        }
+      }
+    }
   }
 
   return match.index;
@@ -166,8 +207,8 @@ const getSummaryFileForLeafMessage = (
 
 const setTerminalTitleOverride = (title) => {
   process.env.CLAUDE_CODE_DISABLE_TERMINAL_TITLE = 1;
-  if (process.platform === "win32") process.title = 'Claude: ' + title;
-  else process.stdout.write('\\x1B]0;Claude: ' + title + '\\x07');
+  if (process.platform === "win32") process.title = title;
+  else process.stdout.write('\\x1B]0;' + title + '\\x07');
 };
 
 let CUR_CONVERSATION_TITLE = "";

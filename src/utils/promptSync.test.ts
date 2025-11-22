@@ -1,10 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import * as fs from 'node:fs/promises';
 import * as promptSync from './promptSync.js';
 import type { StringsPrompt, StringsFile } from './promptSync.js';
-
-vi.mock('node:fs/promises');
-vi.mock('./download.js');
 
 const createEnoent = () => {
   const error: NodeJS.ErrnoException = new Error(
@@ -21,14 +19,14 @@ describe('promptSync.ts', () => {
 
   describe('parseMarkdownPrompt', () => {
     it('should parse markdown with frontmatter', () => {
-      const markdown = `<!--
+      const markdown = `---
 name: Test Prompt
 description: A test prompt
 ccVersion: 1.0.0
 variables:
   - SETTINGS
   - CONFIG
--->
+---
 
 This is the content with \${SETTINGS.preferredName} and \${CONFIG.taskType}.`;
 
@@ -39,17 +37,19 @@ This is the content with \${SETTINGS.preferredName} and \${CONFIG.taskType}.`;
         description: 'A test prompt',
         ccVersion: '1.0.0',
         variables: ['SETTINGS', 'CONFIG'],
+        identifiers: [],
+        identifierMap: {},
         content:
           'This is the content with ${SETTINGS.preferredName} and ${CONFIG.taskType}.',
       });
     });
 
     it('should handle markdown without variables', () => {
-      const markdown = `<!--
+      const markdown = `---
 name: Simple Prompt
 description: No variables
 ccVersion: 1.0.0
--->
+---
 
 Simple content.`;
 
@@ -60,13 +60,15 @@ Simple content.`;
         description: 'No variables',
         ccVersion: '1.0.0',
         variables: [],
+        identifiers: [],
+        identifierMap: {},
         content: 'Simple content.',
       });
     });
 
     it('should handle missing frontmatter fields', () => {
-      const markdown = `<!--
--->
+      const markdown = `---
+---
 
 Content only.`;
 
@@ -77,6 +79,8 @@ Content only.`;
         description: '',
         ccVersion: '',
         variables: [],
+        identifiers: [],
+        identifierMap: {},
         content: 'Content only.',
       });
     });
@@ -476,11 +480,11 @@ Content only.`;
 
   describe('readPromptFile', () => {
     it('should read and parse prompt file', async () => {
-      const mockContent = `<!--
+      const mockContent = `---
 name: Test Prompt
 description: Test
 ccVersion: 1.0.0
--->
+---
 
 Content here`;
 
@@ -493,6 +497,8 @@ Content here`;
         description: 'Test',
         ccVersion: '1.0.0',
         variables: [],
+        identifiers: [],
+        identifierMap: {},
         content: 'Content here',
       });
     });
@@ -515,13 +521,13 @@ Content here`;
 
   describe('updateVariables', () => {
     it('should update variables in frontmatter', async () => {
-      const mockContent = `<!--
+      const mockContent = `---
 name: Test
 description: Test
 ccVersion: 1.0.0
 variables:
   - OLD_VAR
--->
+---
 
 Content`;
 
@@ -541,13 +547,13 @@ Content`;
     });
 
     it('should remove variables field when identifierMap is empty', async () => {
-      const mockContent = `<!--
+      const mockContent = `---
 name: Test
 description: Test
 ccVersion: 1.0.0
 variables:
   - OLD_VAR
--->
+---
 
 Content`;
 
@@ -644,11 +650,11 @@ Content`;
     });
 
     it('should skip if versions match', async () => {
-      const mockContent = `<!--
+      const mockContent = `---
 name: test-prompt
 description: Test prompt
 ccVersion: 2.0.0
--->
+---
 
 Greet user as \${SETTINGS.preferredName}!`;
 
@@ -664,11 +670,11 @@ Greet user as \${SETTINGS.preferredName}!`;
     });
 
     it('should warn about version mismatch when user version is older', async () => {
-      const mockContent = `<!--
+      const mockContent = `---
 name: test-prompt
 description: Test prompt
 ccVersion: 1.0.0
--->
+---
 
 Greet user as \${SETTINGS.preferredName}!`;
 
@@ -691,7 +697,7 @@ Greet user as \${SETTINGS.preferredName}!`;
       const { downloadStringsFile } = await import('./download.js');
       const hashIndexModule = await import('./systemPromptHashIndex.js');
 
-      vi.mocked(downloadStringsFile).mockResolvedValue(
+      (downloadStringsFile as any).mockResolvedValue(
         mockOldStringsFile as StringsFile
       );
       vi.spyOn(hashIndexModule, 'getPromptHash').mockResolvedValue(
@@ -711,13 +717,13 @@ Greet user as \${SETTINGS.preferredName}!`;
     });
 
     it('should always update variables list', async () => {
-      const mockContent = `<!--
+      const mockContent = `---
 name: test-prompt
 description: Test prompt
 ccVersion: 2.0.0
 variables:
   - OLD_VAR
--->
+---
 
 Greet user as \${SETTINGS.preferredName}!`;
 
@@ -763,7 +769,7 @@ Greet user as \${SETTINGS.preferredName}!`;
       const { downloadStringsFile } = await import('./download.js');
       const hashIndexModule = await import('./systemPromptHashIndex.js');
 
-      vi.mocked(downloadStringsFile).mockResolvedValue(
+      (downloadStringsFile as any).mockResolvedValue(
         mockStringsFile as StringsFile
       );
       vi.spyOn(hashIndexModule, 'storeHashes').mockResolvedValue(0);
@@ -797,7 +803,7 @@ Greet user as \${SETTINGS.preferredName}!`;
       };
 
       const { downloadStringsFile } = await import('./download.js');
-      vi.mocked(downloadStringsFile).mockResolvedValue(
+      (downloadStringsFile as any).mockResolvedValue(
         mockStringsFile as StringsFile
       );
 
@@ -816,7 +822,7 @@ Greet user as \${SETTINGS.preferredName}!`;
 
     it('should throw error if download fails', async () => {
       const { downloadStringsFile } = await import('./download.js');
-      vi.mocked(downloadStringsFile).mockRejectedValue(
+      (downloadStringsFile as any).mockRejectedValue(
         new Error('Download failed')
       );
 

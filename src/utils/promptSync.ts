@@ -9,6 +9,7 @@ import {
   computeMD5Hash,
 } from './systemPromptHashIndex.js';
 import chalk from 'chalk';
+import { validateStringsFile, formatPromptValidationResults } from './promptValidation.js';
 
 /**
  * Prompt structure from strings-X.Y.Z.json files
@@ -39,6 +40,8 @@ export interface MarkdownPrompt {
   description: string;
   ccVersion: string; // CC version this prompt is based on
   variables?: string[]; // Available variables extracted from identifierMap
+  identifiers?: (number | string)[]; // Original identifiers array from strings data
+  identifierMap?: Record<string, string>; // Original identifierMap from strings data
   content: string; // The actual prompt content with ${VARIABLE_NAME} placeholders
 }
 
@@ -65,26 +68,26 @@ export interface SyncSummary {
 
 /**
  * Parses markdown file with YAML frontmatter using gray-matter
- * Uses HTML comment delimiters to avoid conflicts with markdown content
+ * Uses standard YAML delimiters to match Claude Code format
  */
 export const parseMarkdownPrompt = (markdown: string): MarkdownPrompt => {
-  const parsed = matter(markdown, {
-    delimiters: ['<!--', '-->'],
-  });
-  const { name, description, ccVersion, variables } = parsed.data;
+  const parsed = matter(markdown);
+  const { name, description, ccVersion, variables, identifiers, identifierMap } = parsed.data;
 
   return {
     name: name || '',
     description: description || '',
     ccVersion: ccVersion || '',
     variables: variables || [],
+    identifiers: identifiers || [],
+    identifierMap: identifierMap || {},
     content: parsed.content.trim(),
   };
 };
 
 /**
  * Generates markdown file content from a prompt using gray-matter
- * Uses HTML comment delimiters to avoid conflicts with markdown content
+ * Uses standard YAML delimiters to match Claude Code format
  */
 export const generateMarkdownFromPrompt = (
   prompt: StringsPrompt,
@@ -105,20 +108,33 @@ export const generateMarkdownFromPrompt = (
       ? [...new Set(Object.values(prompt.identifierMap))]
       : undefined;
 
-  // Build frontmatter data
-  const frontmatterData: Record<string, string | string[]> = {
+  // Build frontmatter data to match Claude Code's format
+  const frontmatterData: Record<string, string | string[] | number[] | Record<string, string>> = {
     name: prompt.name,
     description: prompt.description,
-    ccVersion: prompt.version,
   };
 
+  // Add ccVersion if available (tweakcc-specific field)
+  if (prompt.version) {
+    frontmatterData.ccVersion = prompt.version;
+  }
+
+  // Add variables if present
   if (variables && variables.length > 0) {
     frontmatterData.variables = variables;
   }
 
-  return matter.stringify(content, frontmatterData, {
-    delimiters: ['<!--', '-->'],
-  });
+  // Add identifiers if present (from original prompt data)
+  if (prompt.identifiers && prompt.identifiers.length > 0) {
+    frontmatterData.identifiers = prompt.identifiers;
+  }
+
+  // Add identifierMap if present and has entries
+  if (prompt.identifierMap && Object.keys(prompt.identifierMap).length > 0) {
+    frontmatterData.identifierMap = prompt.identifierMap;
+  }
+
+  return matter.stringify(content, frontmatterData);
 };
 
 /**
@@ -137,8 +153,22 @@ export const reconstructContentFromPieces = (
     // Add the identifier placeholder if there's a corresponding identifier
     if (i < identifiers.length) {
       const labelIndex = identifiers[i];
-      const humanName =
-        identifierMap[String(labelIndex)] || `UNKNOWN_${labelIndex}`;
+      const mappedValue = identifierMap[String(labelIndex)];
+
+      let humanName: string;
+      if (mappedValue) {
+        // Check if it's a TODO/PLACEHOLDER that should be flagged
+        if (mappedValue === 'TODO_TOOL_OBJECT') {
+          humanName = '[TODO: Define tool object]';
+        } else if (mappedValue.includes('TODO') || mappedValue.includes('PLACEHOLDER')) {
+          humanName = `[PLACEHOLDER: ${mappedValue}]`;
+        } else {
+          humanName = mappedValue;
+        }
+      } else {
+        humanName = `[MISSING_IDENTIFIER: ${labelIndex}]`;
+      }
+
       result += humanName;
     }
   }
@@ -321,9 +351,7 @@ export const updateVariables = async (
 ): Promise<void> => {
   const filePath = getPromptFilePath(promptId);
   const markdown = await fs.readFile(filePath, 'utf-8');
-  const parsed = matter(markdown, {
-    delimiters: ['<!--', '-->'],
-  });
+  const parsed = matter(markdown);
 
   // Extract unique variables from identifierMap
   const variables =
@@ -342,9 +370,7 @@ export const updateVariables = async (
     updatedData.variables = variables;
   }
 
-  const updatedMarkdown = matter.stringify(parsed.content, updatedData, {
-    delimiters: ['<!--', '-->'],
-  });
+  const updatedMarkdown = matter.stringify(parsed.content, updatedData);
   await writePromptFile(promptId, updatedMarkdown);
 };
 
@@ -923,6 +949,24 @@ export const syncSystemPrompts = async (
 
   // Download strings file for current CC version
   const stringsFile = await downloadStringsFile(ccVersion);
+
+  // Validate the strings file for missing/invalid data
+  const validation = validateStringsFile(stringsFile);
+
+  // Display validation warnings for placeholders and issues
+  if (validation.warnings.length > 0) {
+    console.log(chalk.yellow('⚠️  Prompt validation warnings:'));
+    const warningMessages = formatPromptValidationResults(validation);
+    warningMessages.forEach(message => console.log(chalk.yellow(`  ${message}`)));
+  }
+
+  // Fail fast on critical validation errors
+  if (!validation.isValid) {
+    console.log(chalk.red('❌ Critical prompt validation errors found:'));
+    const errorMessages = formatPromptValidationResults(validation);
+    errorMessages.forEach(message => console.log(chalk.red(`  ${message}`)));
+    throw new Error('Prompt validation failed. See errors above for details.');
+  }
 
   // Store hashes for all prompts in this version
   await storeHashes(stringsFile);

@@ -18,6 +18,7 @@ import {
   TweakccConfig,
 } from './types.js';
 import {
+  checkRestorePermissions,
   hashFileInChunks,
   isDebug,
   replaceFileBreakingHardLinks,
@@ -28,6 +29,7 @@ import {
   clearAllAppliedHashes,
 } from './systemPromptHashIndex.js';
 import { extractClaudeJsFromNativeInstallation } from './nativeInstallation.js';
+import { validateTweakccConfig, formatValidationErrors } from './validation-simple.js';
 
 export const ensureConfigDir = async (): Promise<void> => {
   await fs.mkdir(CONFIG_DIR, { recursive: true });
@@ -175,6 +177,29 @@ export const readConfigFile = async (): Promise<TweakccConfig> => {
       readConfig.changesApplied = false;
     }
 
+    // Validate the configuration before returning
+    const validation = validateTweakccConfig(readConfig);
+    if (!validation.isValid) {
+      console.error(formatValidationErrors(validation.errors));
+
+      // For non-critical validation errors, we can try to fix them by merging with defaults
+      // but for critical errors, we should throw an exception
+      const criticalErrors = validation.errors.filter(error =>
+        error.field.includes('settings.themes') ||
+        error.field.includes('settings.toolsets')
+      );
+
+      if (criticalErrors.length > 0) {
+        throw new Error(`Critical configuration validation errors:\n${formatValidationErrors(criticalErrors)}`);
+      }
+
+      // For non-critical errors, log a warning but continue
+      const nonCriticalErrors = validation.errors.filter(error => !criticalErrors.includes(error));
+      if (nonCriticalErrors.length > 0) {
+        console.warn(`Configuration validation warnings:\n${formatValidationErrors(nonCriticalErrors)}`);
+      }
+    }
+
     lastConfig = readConfig;
     return readConfig;
   } catch (error) {
@@ -196,6 +221,29 @@ export const updateConfigFile = async (
   }
   updateFn(lastConfig);
   lastConfig.lastModified = new Date().toISOString();
+
+  // Validate the configuration before saving
+  const validation = validateTweakccConfig(lastConfig);
+  if (!validation.isValid) {
+    console.error(formatValidationErrors(validation.errors));
+
+    // For critical errors, throw an exception before saving
+    const criticalErrors = validation.errors.filter(error =>
+      error.field.includes('settings.themes') ||
+      error.field.includes('settings.toolsets')
+    );
+
+    if (criticalErrors.length > 0) {
+      throw new Error(`Critical configuration validation errors:\n${formatValidationErrors(criticalErrors)}`);
+    }
+
+    // For non-critical errors, log a warning but continue
+    const nonCriticalErrors = validation.errors.filter(error => !criticalErrors.includes(error));
+    if (nonCriticalErrors.length > 0) {
+      console.warn(`Configuration validation warnings:\n${formatValidationErrors(nonCriticalErrors)}`);
+    }
+  }
+
   await saveConfig(lastConfig);
   return lastConfig;
 };
@@ -233,6 +281,12 @@ export const restoreClijsFromBackup = async (
 
   if (isDebug()) {
     console.log(`Restoring cli.js from backup to ${ccInstInfo.cliPath}`);
+  }
+
+  // Check permissions before proceeding
+  const hasPermissions = await checkRestorePermissions([ccInstInfo.cliPath!, CLIJS_BACKUP_FILE]);
+  if (!hasPermissions) {
+    throw new Error('Insufficient permissions to restore cli.js. Check file permissions and disk space.');
   }
 
   // Read the backup content
@@ -287,6 +341,12 @@ export const restoreNativeBinaryFromBackup = async (
     );
   }
 
+  // Check permissions before proceeding
+  const hasPermissions = await checkRestorePermissions([ccInstInfo.nativeInstallationPath!, NATIVE_BINARY_BACKUP_FILE]);
+  if (!hasPermissions) {
+    throw new Error('Insufficient permissions to restore native binary. Check file permissions and disk space.');
+  }
+
   // Read the backup content
   const backupContent = await fs.readFile(NATIVE_BINARY_BACKUP_FILE);
 
@@ -296,6 +356,13 @@ export const restoreNativeBinaryFromBackup = async (
     backupContent,
     'restore'
   );
+
+  // Clear all applied hashes since we're restoring to defaults
+  await clearAllAppliedHashes();
+
+  await updateConfigFile(config => {
+    config.changesApplied = false;
+  });
 
   return true;
 };
@@ -518,7 +585,7 @@ export const findClaudeCodeInstallation = async (
   return null;
 };
 
-const backupClijs = async (ccInstInfo: ClaudeCodeInstallationInfo) => {
+export const backupClijs = async (ccInstInfo: ClaudeCodeInstallationInfo) => {
   // Only backup cli.js for NPM installs (when cliPath is set)
   if (!ccInstInfo.cliPath) {
     if (isDebug()) {
@@ -527,37 +594,47 @@ const backupClijs = async (ccInstInfo: ClaudeCodeInstallationInfo) => {
     return;
   }
 
-  await ensureConfigDir();
-  if (isDebug()) {
-    console.log(`Backing up cli.js to ${CLIJS_BACKUP_FILE}`);
+  try {
+    await ensureConfigDir();
+    if (isDebug()) {
+      console.log(`Backing up cli.js to ${CLIJS_BACKUP_FILE}`);
+    }
+    await fs.copyFile(ccInstInfo.cliPath, CLIJS_BACKUP_FILE);
+    await updateConfigFile(config => {
+      config.changesApplied = false;
+      config.ccVersion = ccInstInfo.version;
+    });
+  } catch (error) {
+    console.error('Failed to backup cli.js:', error instanceof Error ? error.message : String(error));
+    throw new Error(`Backup failed: ${error instanceof Error ? error.message : String(error)}`);
   }
-  await fs.copyFile(ccInstInfo.cliPath, CLIJS_BACKUP_FILE);
-  await updateConfigFile(config => {
-    config.changesApplied = false;
-    config.ccVersion = ccInstInfo.version;
-  });
 };
 
 /**
  * Backs up the native installation binary to the config directory.
  */
-const backupNativeBinary = async (ccInstInfo: ClaudeCodeInstallationInfo) => {
+export const backupNativeBinary = async (ccInstInfo: ClaudeCodeInstallationInfo) => {
   if (!ccInstInfo.nativeInstallationPath) {
     return;
   }
 
-  await ensureConfigDir();
-  if (isDebug()) {
-    console.log(`Backing up native binary to ${NATIVE_BINARY_BACKUP_FILE}`);
+  try {
+    await ensureConfigDir();
+    if (isDebug()) {
+      console.log(`Backing up native binary to ${NATIVE_BINARY_BACKUP_FILE}`);
+    }
+    await fs.copyFile(
+      ccInstInfo.nativeInstallationPath,
+      NATIVE_BINARY_BACKUP_FILE
+    );
+    await updateConfigFile(config => {
+      config.changesApplied = false;
+      config.ccVersion = ccInstInfo.version;
+    });
+  } catch (error) {
+    console.error('Failed to backup native binary:', error instanceof Error ? error.message : String(error));
+    throw new Error(`Backup failed: ${error instanceof Error ? error.message : String(error)}`);
   }
-  await fs.copyFile(
-    ccInstInfo.nativeInstallationPath,
-    NATIVE_BINARY_BACKUP_FILE
-  );
-  await updateConfigFile(config => {
-    config.changesApplied = false;
-    config.ccVersion = ccInstInfo.version;
-  });
 };
 
 /**
@@ -594,8 +671,13 @@ export async function startupCheck(): Promise<StartupCheckInfo | null> {
         `startupCheck: ${CLIJS_BACKUP_FILE} not found; backing up cli.js`
       );
     }
-    await backupClijs(ccInstInfo);
-    hasBackedUp = true;
+    try {
+      await backupClijs(ccInstInfo);
+      hasBackedUp = true;
+    } catch (error) {
+      console.error('Failed to create initial backup:', error instanceof Error ? error.message : String(error));
+      // Continue without backup - user may need to manually create backup
+    }
   }
 
   // Backup native binary if we don't have any backup yet (for native installations)
@@ -609,8 +691,13 @@ export async function startupCheck(): Promise<StartupCheckInfo | null> {
         `startupCheck: ${NATIVE_BINARY_BACKUP_FILE} not found; backing up native binary`
       );
     }
-    await backupNativeBinary(ccInstInfo);
-    hasBackedUpNativeBinary = true;
+    try {
+      await backupNativeBinary(ccInstInfo);
+      hasBackedUpNativeBinary = true;
+    } catch (error) {
+      console.error('Failed to create initial native binary backup:', error instanceof Error ? error.message : String(error));
+      // Continue without backup - user may need to manually create backup
+    }
   }
 
   // If the installed CC version is different from what we have backed up, clear out our backup
@@ -626,7 +713,12 @@ export async function startupCheck(): Promise<StartupCheckInfo | null> {
         );
       }
       await fs.unlink(CLIJS_BACKUP_FILE);
-      await backupClijs(ccInstInfo);
+      try {
+        await backupClijs(ccInstInfo);
+      } catch (error) {
+        console.error('Failed to create backup after version change:', error instanceof Error ? error.message : String(error));
+        // Continue without backup - user may need to manually create backup
+      }
     }
 
     // Also backup native binary if version changed
@@ -639,7 +731,12 @@ export async function startupCheck(): Promise<StartupCheckInfo | null> {
       if (await doesFileExist(NATIVE_BINARY_BACKUP_FILE)) {
         await fs.unlink(NATIVE_BINARY_BACKUP_FILE);
       }
-      await backupNativeBinary(ccInstInfo);
+      try {
+        await backupNativeBinary(ccInstInfo);
+      } catch (error) {
+        console.error('Failed to create native binary backup after version change:', error instanceof Error ? error.message : String(error));
+        // Continue without backup - user may need to manually create backup
+      }
     }
 
     return {

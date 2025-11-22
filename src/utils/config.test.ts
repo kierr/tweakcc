@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import * as config from './config.js';
 import {
   ClaudeCodeInstallationInfo,
@@ -13,15 +13,7 @@ import path from 'node:path';
 import * as misc from './misc.js';
 import * as systemPromptHashIndex from './systemPromptHashIndex.js';
 
-vi.mock('node:fs/promises');
-
-// Mock the replaceFileBreakingHardLinks function
-vi.spyOn(misc, 'replaceFileBreakingHardLinks').mockImplementation(
-  async (filePath, content) => {
-    // Simulate the function by calling the mocked fs.writeFile
-    await fs.writeFile(filePath, content);
-  }
-);
+// Mock fs functions - will be reset in each test if needed
 
 const createEnoent = () => {
   const error: NodeJS.ErrnoException = new Error(
@@ -47,6 +39,15 @@ describe('config.ts', () => {
       systemPromptHashIndex,
       'hasUnappliedSystemPromptChanges'
     ).mockResolvedValue(false);
+    // Mock the replaceFileBreakingHardLinks function
+    vi.spyOn(misc, 'replaceFileBreakingHardLinks').mockImplementation(
+      async (filePath, content) => {
+        // Simulate the function by calling the mocked fs.writeFile
+        await fs.writeFile(filePath, content);
+      }
+    );
+    // Mock the checkRestorePermissions function
+    vi.spyOn(misc, 'checkRestorePermissions').mockResolvedValue(true);
   });
 
   describe('ensureConfigDir', () => {
@@ -140,6 +141,91 @@ describe('config.ts', () => {
 
       expect(cliWriteCall).toBeDefined();
       expect(cliWriteCall![1]).toEqual(Buffer.from('backup content'));
+    });
+  });
+
+  describe('restoreNativeBinaryFromBackup', () => {
+    it('should restore native binary and clear hashes', async () => {
+      // Mock the clearAllAppliedHashes function
+      vi.spyOn(
+        systemPromptHashIndex,
+        'clearAllAppliedHashes'
+      ).mockResolvedValue(undefined);
+
+      // Mock file existence check for backup file
+      const statSpy = vi.spyOn(fs, 'stat');
+      statSpy.mockImplementation((filePath) => {
+        if (String(filePath).includes('native-binary.backup')) {
+          return Promise.resolve({} as Stats);
+        }
+        return Promise.reject(createEnoent());
+      });
+
+      // Mock reading the backup file
+      const readFileSpy = vi.spyOn(fs, 'readFile');
+      readFileSpy.mockImplementation((filePath) => {
+        if (String(filePath).includes('native-binary.backup')) {
+          return Promise.resolve(Buffer.from('native backup content'));
+        }
+        return Promise.reject(createEnoent());
+      });
+
+      // Mock file operations for the helper function
+      vi.spyOn(fs, 'unlink').mockResolvedValue(undefined);
+      const writeFileSpy = vi.spyOn(fs, 'writeFile').mockResolvedValue(undefined);
+      vi.spyOn(fs, 'chmod').mockResolvedValue(undefined);
+
+      const ccInstInfo = {
+        nativeInstallationPath: '/fake/path/claude',
+      } as ClaudeCodeInstallationInfo;
+
+      await config.restoreNativeBinaryFromBackup(ccInstInfo);
+
+      // Verify the backup existence was checked
+      expect(statSpy).toHaveBeenCalledWith(
+        expect.stringContaining('native-binary.backup')
+      );
+
+      // Verify the backup was read
+      expect(readFileSpy).toHaveBeenCalledWith(
+        expect.stringContaining('native-binary.backup')
+      );
+
+      // Verify writeFile was called (at least twice - once for binary, once for config)
+      expect(writeFileSpy).toHaveBeenCalled();
+
+      // Find the call that wrote to the native binary
+      const binaryWriteCall = writeFileSpy.mock.calls.find(
+        call => call[0] === ccInstInfo.nativeInstallationPath
+      );
+
+      expect(binaryWriteCall).toBeDefined();
+      expect(binaryWriteCall![1]).toEqual(Buffer.from('native backup content'));
+
+      // Verify clearAllAppliedHashes was called
+      expect(systemPromptHashIndex.clearAllAppliedHashes).toHaveBeenCalled();
+    });
+
+    it('should return false when no native installation path', async () => {
+      const ccInstInfo = {
+        cliPath: '/fake/path/cli.js',
+        nativeInstallationPath: undefined,
+      } as ClaudeCodeInstallationInfo;
+
+      const result = await config.restoreNativeBinaryFromBackup(ccInstInfo);
+      expect(result).toBe(false);
+    });
+
+    it('should return false when backup file does not exist', async () => {
+      const ccInstInfo = {
+        nativeInstallationPath: '/fake/path/claude',
+      } as ClaudeCodeInstallationInfo;
+
+      // Mock file not found for backup file
+      vi.spyOn(fs, 'stat').mockRejectedValue(createEnoent());
+
+      const result = await config.restoreNativeBinaryFromBackup(ccInstInfo);
+      expect(result).toBe(false);
     });
   });
 

@@ -1,11 +1,6 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as path from 'path';
 import * as os from 'os';
-
-// Mock fs module
-vi.mock('fs', () => ({
-  existsSync: vi.fn(),
-}));
 
 describe('XDG_CONFIG_HOME support with migration', () => {
   let originalXdgConfigHome: string | undefined;
